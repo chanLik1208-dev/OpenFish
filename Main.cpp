@@ -10,7 +10,6 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QPoint>
-#include <QVBoxLayout>
 #include <QWidget>
 #include <QPixmap>
 #include <QSettings>
@@ -28,7 +27,6 @@
 #include <QUrl>
 #include <QDebug>
 
-// 全域日誌處理函式
 void customMessageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg) {
     Q_UNUSED(context);
     QString txt;
@@ -49,6 +47,7 @@ class DesktopPet : public QMainWindow {
     Q_OBJECT
 
 private:
+    QWidget *centralWidget;
     QLabel *imageLabel;
     QLabel *speechLabel;
     QPoint oldPos;
@@ -65,6 +64,9 @@ private:
     QPixmap pixmapJump;
     QPixmap pixmapTurn;
 
+    // 定義主視窗的固定寬度
+    const int APP_WIDTH = 350;
+
 public:
     DesktopPet(QWidget *parent = nullptr) : QMainWindow(parent) {
         setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool);
@@ -74,52 +76,40 @@ public:
         apiAddress = settings.value("apiAddress", "http://localhost:11434/api/generate").toString();
         modelName = settings.value("modelName", "llama3").toString();
 
-        QWidget *centralWidget = new QWidget(this);
-        QVBoxLayout *layout = new QVBoxLayout(centralWidget);
-        layout->setAlignment(Qt::AlignCenter);
-        
-speechLabel = new QLabel(this);
-        
-        // 🔥【關鍵修復】：告訴排版引擎「垂直方向請盡量伸展，絕對不要壓縮我！」
-        speechLabel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::MinimumExpanding);
-        
+        centralWidget = new QWidget(this);
+        // 🔥【重點】：不再使用 QVBoxLayout！改用絕對定位。
+        setCentralWidget(centralWidget);
+
+        speechLabel = new QLabel(centralWidget);
         speechLabel->setStyleSheet(
             "QLabel {"
             "color: white; "
             "background-color: rgba(255, 105, 180, 210); " 
             "border-radius: 12px; "
-            "padding: 16px; " // 四周都給 16px 的寬裕空間，防切字
+            "padding: 16px; "
             "font-family: 'Microsoft JhengHei', 'PingFang TC', sans-serif; "
-            "font-size: 15px; " // 字體再稍微放大一點點，提高閱讀性
+            "font-size: 15px; "
             "font-weight: bold;"
             "}"
         );
         speechLabel->setAlignment(Qt::AlignCenter);
         speechLabel->setWordWrap(true);
-        speechLabel->setMinimumWidth(150);
-        speechLabel->setMaximumWidth(350);
 
         pixmapIdle = QPixmap("Idle.png").scaled(200, 300, Qt::KeepAspectRatio, Qt::SmoothTransformation);
         pixmapCheer = QPixmap("Idle-Happy.png").scaled(200, 300, Qt::KeepAspectRatio, Qt::SmoothTransformation);
         pixmapJump = QPixmap("Happy-Jump.png").scaled(200, 300, Qt::KeepAspectRatio, Qt::SmoothTransformation);
         pixmapTurn = QPixmap("Happy-Jump-Back.png").scaled(200, 300, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        imageLabel = new QLabel(this);
-        imageLabel->setFixedSize(200, 255);
         
-        // 🔥【復原優化】：讓貓娘的腳永遠貼在框框底部，切換圖片時不會浮空
-        imageLabel->setAlignment(Qt::AlignBottom | Qt::AlignHCenter); 
+        imageLabel = new QLabel(centralWidget);
+        imageLabel->setFixedSize(200, 300);
+        imageLabel->setAlignment(Qt::AlignCenter); 
 
         if (!pixmapIdle.isNull()) {
             imageLabel->setPixmap(pixmapIdle);
         } else {
             imageLabel->setText("🐱\n(找不到素材檔案)");
             imageLabel->setStyleSheet("font-size: 50px; color: pink;");
-            imageLabel->setAlignment(Qt::AlignCenter);
         }
-
-        layout->addWidget(speechLabel);
-        layout->addWidget(imageLabel);
-        setCentralWidget(centralWidget);
 
         networkManager = new QNetworkAccessManager(this);
 
@@ -131,7 +121,7 @@ speechLabel = new QLabel(this);
         idleTimer->setSingleShot(true); 
         connect(idleTimer, &QTimer::timeout, this, [this]() {
             imageLabel->setPixmap(pixmapIdle);
-            updateStateText("等待主人的指令喵..."); // 改用專屬函式更新文字
+            updateStateText("等待主人的指令喵...");
         });
         
         // 初始狀態文字
@@ -139,11 +129,37 @@ speechLabel = new QLabel(this);
     }
 
     void updateStateText(const QString& newText) {
-        // 回歸純文字，讓 Qt 能夠 100% 精準計算高度
         speechLabel->setText(newText);
+        speechLabel->adjustSize(); // 讓氣泡先算出自己該有多高多寬
+
+        // 🔥【手動排版魔法】：每次文字改變後，重新計算並調整整個視窗和元件的位置
         
-        // 🔥【關鍵修復】：文字塞進去之後，強制氣泡框重新適應大小
-        speechLabel->adjustSize(); 
+        int speechWidth = APP_WIDTH; // 氣泡固定寬度
+        // 如果字很少，氣泡可以窄一點；如果字很多，最大寬度就是 APP_WIDTH
+        if (speechLabel->sizeHint().width() < APP_WIDTH) {
+             speechWidth = speechLabel->sizeHint().width() + 32; // 加上 padding 的空間
+        }
+        
+        // 1. 設定氣泡的新尺寸
+        speechLabel->setFixedSize(speechWidth, speechLabel->sizeHint().height());
+
+        // 2. 決定貓娘圖片和氣泡的位置
+        // 讓圖片水平置中
+        int imageX = (APP_WIDTH - 200) / 2; 
+        
+        // 讓氣泡水平置中
+        int speechX = (APP_WIDTH - speechWidth) / 2;
+        
+        // 總高度 = 氣泡高度 + 貓娘高度 + 一點點間距
+        int totalHeight = speechLabel->height() + 300 + 10; 
+
+        // 3. 調整主視窗尺寸
+        this->setFixedSize(APP_WIDTH, totalHeight);
+        centralWidget->setFixedSize(APP_WIDTH, totalHeight);
+
+        // 4. 移動氣泡和圖片到正確的座標 (X, Y)
+        speechLabel->move(speechX, 0); // 氣泡貼著最上面
+        imageLabel->move(imageX, speechLabel->height() + 10); // 貓娘在氣泡下方 10 像素
     }
 
     void updateState(const QPixmap& newImage, const QString& newText) {
@@ -154,7 +170,6 @@ speechLabel = new QLabel(this);
 
     void askOllama(const QString& userInput) {
         QUrl url(apiAddress);
-        qDebug() << "準備發送 API 請求至:" << url.toString(); 
         QNetworkRequest request(url);
         request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
@@ -188,16 +203,13 @@ speechLabel = new QLabel(this);
                 QJsonDocument jsonResponse = QJsonDocument::fromJson(responseData);
                 QString replyText = jsonResponse.object()["response"].toString();
                 
-                qDebug() << "Ollama 成功回覆:" << replyText; 
                 updateState(pixmapCheer, replyText);
                 
-                // 🔥【復原優化】：根據字數動態決定要停留多少秒
                 int displayTimeMs = 3000 + (replyText.length() * 250);
                 if (displayTimeMs < 5000) displayTimeMs = 5000;
                 if (displayTimeMs > 30000) displayTimeMs = 30000;
                 idleTimer->start(displayTimeMs); 
             } else {
-                qDebug() << "連線錯誤:" << reply->errorString(); 
                 updateState(pixmapIdle, "呼... 呼... (連線中斷喵... 檢查一下設定？)");
                 idleTimer->start(8000);
             }
@@ -283,8 +295,6 @@ protected:
 
 int main(int argc, char *argv[]) {
     qInstallMessageHandler(customMessageHandler);
-    qDebug() << "=== 桌面寵物啟動 ===";
-
     QApplication app(argc, argv);
     DesktopPet pet;
     pet.show();
