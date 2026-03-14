@@ -78,21 +78,35 @@ public:
         QVBoxLayout *layout = new QVBoxLayout(centralWidget);
         layout->setAlignment(Qt::AlignCenter);
         
-        speechLabel = new QLabel("喵... 主人好...", this);
-        speechLabel->setStyleSheet("color: white; background-color: rgba(255, 105, 180, 180); border-radius: 10px; padding: 10px; font-weight: bold;");
+        speechLabel = new QLabel(this);
+        
+        // 🔥【排版優化 1】：指定易讀字體、放大字體(14px)、加寬內邊距(padding)
+        speechLabel->setStyleSheet(
+            "QLabel {"
+            "color: white; "
+            "background-color: rgba(255, 105, 180, 210); " // 稍微調高不透明度，讓字更清晰
+            "border-radius: 12px; "
+            "padding: 12px 16px; " // 上下 12px，左右 16px
+            "font-family: 'Microsoft JhengHei', 'PingFang TC', sans-serif; "
+            "font-size: 14px; "
+            "font-weight: bold;"
+            "}"
+        );
         speechLabel->setAlignment(Qt::AlignCenter);
         speechLabel->setWordWrap(true);
         speechLabel->setMinimumWidth(200);
+        speechLabel->setMaximumWidth(350); // 🔥 防止文字太長時氣泡變得無限寬
 
-        pixmapIdle = QPixmap("待機.png").scaled(200, 200, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        pixmapCheer = QPixmap("歡呼雀躍-原地加油.png").scaled(200, 200, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        pixmapJump = QPixmap("歡呼雀躍-跳起來.png").scaled(200, 200, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        pixmapTurn = QPixmap("歡呼雀躍-跳+轉身.png").scaled(200, 200, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        pixmapIdle = QPixmap("Idle.png").scaled(200, 200, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        pixmapCheer = QPixmap("Idle-Happy.png").scaled(200, 200, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        pixmapJump = QPixmap("Happy-Jump.png").scaled(200, 200, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        pixmapTurn = QPixmap("Happy-Jump-Back.png").scaled(200, 200, Qt::KeepAspectRatio, Qt::SmoothTransformation);
 
         imageLabel = new QLabel(this);
-        
-        // 🔥【修復 1】：強制鎖死圖片標籤的大小，這樣不管文字再多，圖片絕對不會被壓縮！
         imageLabel->setFixedSize(200, 200); 
+        
+        // 🔥【復原優化】：讓貓娘的腳永遠貼在框框底部，切換圖片時不會浮空
+        imageLabel->setAlignment(Qt::AlignBottom | Qt::AlignHCenter); 
 
         if (!pixmapIdle.isNull()) {
             imageLabel->setPixmap(pixmapIdle);
@@ -116,13 +130,25 @@ public:
         idleTimer->setSingleShot(true); 
         connect(idleTimer, &QTimer::timeout, this, [this]() {
             imageLabel->setPixmap(pixmapIdle);
-            speechLabel->setText("等待主人的指令喵...");
+            updateStateText("等待主人的指令喵..."); // 改用專屬函式更新文字
         });
+        
+        // 初始狀態文字
+        updateStateText("喵... 主人好...");
+    }
+
+    // 🔥【排版優化 2】：專門處理文字，強制轉成 HTML 並加上 150% 的行距！
+    void updateStateText(const QString& newText) {
+        // 先將普通的換行符號轉成 HTML 的 <br>
+        QString safeText = newText.toHtmlEscaped().replace("\n", "<br>");
+        // 用 div 包起來，強制設定行距
+        QString formattedText = QString("<div style='line-height: 150%;'>%1</div>").arg(safeText);
+        speechLabel->setText(formattedText);
     }
 
     void updateState(const QPixmap& newImage, const QString& newText) {
         imageLabel->setPixmap(newImage);
-        speechLabel->setText(newText);
+        updateStateText(newText);
         idleTimer->stop(); 
     }
 
@@ -164,10 +190,16 @@ public:
                 
                 qDebug() << "Ollama 成功回覆:" << replyText; 
                 updateState(pixmapCheer, replyText);
-                idleTimer->start(8000); 
+                
+                // 🔥【復原優化】：根據字數動態決定要停留多少秒
+                int displayTimeMs = 3000 + (replyText.length() * 250);
+                if (displayTimeMs < 5000) displayTimeMs = 5000;
+                if (displayTimeMs > 30000) displayTimeMs = 30000;
+                idleTimer->start(displayTimeMs); 
             } else {
                 qDebug() << "連線錯誤:" << reply->errorString(); 
                 updateState(pixmapIdle, "呼... 呼... (連線中斷喵... 檢查一下設定？)");
+                idleTimer->start(8000);
             }
             reply->deleteLater();
         });
@@ -179,8 +211,6 @@ public:
     }
 
     void openSettings() {
-        // 🔥【修復 2】：把 this 換成 nullptr，斷絕與透明貓娘的父子關係
-        // 並強制加上 Qt::WindowStaysOnTopHint，確保設定視窗一定會跳到最前面！
         QDialog dialog(nullptr); 
         dialog.setWindowFlags(Qt::Dialog | Qt::WindowCloseButtonHint | Qt::WindowStaysOnTopHint);
         
