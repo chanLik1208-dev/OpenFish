@@ -244,11 +244,14 @@ protected:
         QAction *logAction = menu.addAction("開啟除錯日誌 (Open Log)"); // <== 新增這行
         QAction *quitAction = menu.addAction("離開 (Quit)");
 
-        connect(settingsAction, &QAction::triggered, this, &DesktopPet::openSettings);
-        // 點擊後，自動用系統預設的記事本打開 log 檔
+// 點擊後，自動用系統預設的記事本打開 log 檔
         connect(logAction, &QAction::triggered, [](){
             QDesktopServices::openUrl(QUrl::fromLocalFile("pet_debug.log"));
         });
+        
+        // 👇👇👇 請在這裡補上這一行，把離開按鈕接上！ 👇👇👇
+        connect(quitAction, &QAction::triggered, qApp, &QCoreApplication::quit);
+
         menu.exec(event->globalPos());
     }
 };
