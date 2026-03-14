@@ -1,0 +1,5 @@
+/workspaces/OpenFish/build/CMakeFiles/DesktopPet.dir
+/workspaces/OpenFish/build/CMakeFiles/edit_cache.dir
+/workspaces/OpenFish/build/CMakeFiles/rebuild_cache.dir
+/workspaces/OpenFish/build/CMakeFiles/DesktopPet_autogen_timestamp_deps.dir
+/workspaces/OpenFish/build/CMakeFiles/DesktopPet_autogen.dir
