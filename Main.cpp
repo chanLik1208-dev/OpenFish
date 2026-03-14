@@ -21,6 +21,30 @@
 #include <QLineEdit>
 #include <QPushButton>
 #include <QMessageBox>
+#include <QFile>
+#include <QTextStream>
+#include <QDateTime>
+#include <QDesktopServices>
+#include <QUrl>
+#include <QDebug>
+
+// 全域日誌處理函式 (攔截所有的 qDebug, qWarning 等輸出)
+void customMessageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg) {
+    Q_UNUSED(context);
+    QString txt;
+    switch (type) {
+        case QtDebugMsg:    txt = QString("[除錯] %1").arg(msg); break;
+        case QtWarningMsg:  txt = QString("[警告] %1").arg(msg); break;
+        case QtCriticalMsg: txt = QString("[嚴重] %1").arg(msg); break;
+        case QtFatalMsg:    txt = QString("[致命] %1").arg(msg); abort();
+        case QtInfoMsg:     txt = QString("[資訊] %1").arg(msg); break;
+    }
+    // 將訊息寫入到執行檔旁邊的 pet_debug.log
+    QFile outFile("pet_debug.log");
+    outFile.open(QIODevice::WriteOnly | QIODevice::Append);
+    QTextStream ts(&outFile);
+    ts << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz ") << txt << Qt::endl;
+}
 
 class DesktopPet : public QMainWindow {
     Q_OBJECT
@@ -109,6 +133,7 @@ public:
 
     void askOllama(const QString& userInput) {
         QUrl url(apiAddress);
+        qDebug() << "準備發送 API 請求至:" << url.toString(); 
         QNetworkRequest request(url);
         request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
@@ -134,18 +159,17 @@ public:
         QByteArray data = QJsonDocument(jsonBody).toJson();
         QNetworkReply *reply = networkManager->post(request, data);
 
-        connect(reply, &QNetworkReply::finished, this, [this, reply]() {
+connect(reply, &QNetworkReply::finished, this, [this, reply]() {
             if (reply->error() == QNetworkReply::NoError) {
                 QByteArray responseData = reply->readAll();
                 QJsonDocument jsonResponse = QJsonDocument::fromJson(responseData);
                 QString replyText = jsonResponse.object()["response"].toString();
                 
-                // 收到回覆，切換成「原地加油」的撒嬌狀態
+                qDebug() << "Ollama 成功回覆:" << replyText; // <== 新增這行
                 updateState(pixmapCheer, replyText);
-                
-                // 開始倒數 8 秒，之後變回待機圖
                 idleTimer->start(8000); 
             } else {
+                qDebug() << "連線錯誤:" << reply->errorString(); // <== 新增這行 (超級重要，會告訴你為什麼連不上)
                 updateState(pixmapIdle, "呼... 呼... (連線中斷喵... 檢查一下設定？)");
             }
             reply->deleteLater();
@@ -215,16 +239,23 @@ protected:
         menu.setStyleSheet("background-color: white;"); 
 
         QAction *settingsAction = menu.addAction("設定 (Settings)");
+        QAction *logAction = menu.addAction("開啟除錯日誌 (Open Log)"); // <== 新增這行
         QAction *quitAction = menu.addAction("離開 (Quit)");
 
         connect(settingsAction, &QAction::triggered, this, &DesktopPet::openSettings);
-        connect(quitAction, &QAction::triggered, qApp, &QCoreApplication::quit);
-
+        // 點擊後，自動用系統預設的記事本打開 log 檔
+        connect(logAction, &QAction::triggered, [](){
+            QDesktopServices::openUrl(QUrl::fromLocalFile("pet_debug.log"));
+        });
         menu.exec(event->globalPos());
     }
 };
 
 int main(int argc, char *argv[]) {
+// 啟動我們的除錯日誌記錄器
+    qInstallMessageHandler(customMessageHandler);
+    qDebug() << "=== 桌面寵物啟動 ===";
+
     QApplication app(argc, argv);
     DesktopPet pet;
     pet.show();

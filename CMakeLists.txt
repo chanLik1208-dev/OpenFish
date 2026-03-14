@@ -11,7 +11,7 @@ set(CMAKE_AUTORCC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network)
 
-# 這裡的 Main.cpp 大小寫必須跟你左側的檔名一模一樣喔！
-add_executable(DesktopPet Main.cpp)
-
+add_executable(DesktopPet WIN32 Main.cpp)
+# 同時加上 WIN32 (隱藏 Windows 黑視窗) 和 MACOSX_BUNDLE (產生 Mac App)
+add_executable(DesktopPet WIN32 MACOSX_BUNDLE Main.cpp)
 target_link_libraries(DesktopPet PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network)
