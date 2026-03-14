@@ -1,0 +1,44 @@
+name: Build Windows EXE
+
+# 當你推送程式碼，或是手動點擊時觸發
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest # 召喚一台雲端 Windows 電腦
+
+    steps:
+    - name: 下載你的程式碼
+      uses: actions/checkout@v4
+
+    - name: 安裝 Qt6 環境
+      uses: jurplel/install-qt-action@v3
+      with:
+        version: '6.6.0'
+        host: 'windows'
+        target: 'desktop'
+        arch: 'win64_msvc2019_64'
+
+    - name: 執行 CMake 設定
+      run: cmake -B build
+
+    - name: 開始編譯 (Release 模式)
+      run: cmake --build build --config Release
+
+    - name: 打包 Qt 依賴檔案 (windeployqt)
+      # 這是最重要的一步！把需要的 DLL 綁定給 EXE，不然在別人的電腦會打不開
+      run: |
+        windeployqt build/Release/DesktopPet.exe
+
+    - name: 將你的貓娘圖片複製進去打包資料夾
+      run: |
+        Copy-Item "*.png" -Destination "build/Release/"
+
+    - name: 上傳最終的 EXE 壓縮檔讓你下載
+      uses: actions/upload-artifact@v4
+      with:
+        name: DesktopPet-Windows-App
+        path: build/Release/
