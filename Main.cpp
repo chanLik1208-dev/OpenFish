@@ -39,7 +39,9 @@ void customMessageHandler(QtMsgType type, const QMessageLogContext& context, con
     case QtFatalMsg:    txt = QString("[致命] %1").arg(msg); abort();
     case QtInfoMsg:     txt = QString("[資訊] %1").arg(msg); break;
     }
-    QFile outFile("pet_debug.log");
+    // 🔥 強制將日誌寫在執行檔同一個資料夾，確保紀錄不會分散
+    QString logPath = QCoreApplication::applicationDirPath() + "/pet_debug.log";
+    QFile outFile(logPath);
     outFile.open(QIODevice::WriteOnly | QIODevice::Append);
     QTextStream ts(&outFile);
     ts << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz ") << txt << Qt::endl;
@@ -254,19 +256,18 @@ public:
     }
 
     void openSettings() {
-        QDialog dialog(nullptr);
-        dialog.setWindowFlags(Qt::Dialog | Qt::WindowCloseButtonHint | Qt::WindowStaysOnTopHint);
+        // 改用指標並指定 parent，避免記憶體洩漏與懸空參照
+        QDialog* dialog = new QDialog(this);
+        dialog->setWindowFlags(Qt::Dialog | Qt::WindowCloseButtonHint | Qt::WindowStaysOnTopHint);
+        dialog->setWindowTitle("寵物設定");
+        dialog->setStyleSheet("background-color: white;");
 
-        dialog.setWindowTitle("寵物設定");
-        dialog.setStyleSheet("background-color: white;");
+        QFormLayout* form = new QFormLayout(dialog);
 
-        QFormLayout form(&dialog);
+        QLineEdit* urlInput = new QLineEdit(apiAddress, dialog);
+        QLineEdit* modelInput = new QLineEdit(modelName, dialog);
 
-        QLineEdit* urlInput = new QLineEdit(apiAddress, &dialog);
-        QLineEdit* modelInput = new QLineEdit(modelName, &dialog);
-
-        // 🔥 新增設定視窗內的縮放下拉選單
-        QComboBox* scaleCombo = new QComboBox(&dialog);
+        QComboBox* scaleCombo = new QComboBox(dialog);
         scaleCombo->addItem("50%", 0.5);
         scaleCombo->addItem("75%", 0.75);
         scaleCombo->addItem("100%", 1.0);
@@ -276,33 +277,44 @@ public:
         int idx = scaleCombo->findData(scaleFactor);
         if (idx >= 0) scaleCombo->setCurrentIndex(idx);
 
-        form.addRow("Ollama API 地址:", urlInput);
-        form.addRow("AI 模型名稱:", modelInput);
-        form.addRow("寵物顯示大小:", scaleCombo);
+        form->addRow("Ollama API 地址:", urlInput);
+        form->addRow("AI 模型名稱:", modelInput);
+        form->addRow("寵物顯示大小:", scaleCombo);
 
-        QPushButton* saveButton = new QPushButton("儲存設定", &dialog);
-        form.addRow(saveButton);
+        QPushButton* saveButton = new QPushButton("儲存設定", dialog);
+        form->addRow(saveButton);
 
-        connect(saveButton, &QPushButton::clicked, [&]() {
+        // 用來記錄「視窗關閉後」是否需要進行縮放
+        bool pendingScale = false;
+        double newScaleValue = scaleFactor;
+
+        // 🔥 使用 [=] 捕獲指標，確保安全
+        connect(saveButton, &QPushButton::clicked, [=, &pendingScale, &newScaleValue]() {
             apiAddress = urlInput->text();
             modelName = modelInput->text();
-            double newScale = scaleCombo->currentData().toDouble();
+            newScaleValue = scaleCombo->currentData().toDouble();
 
             QSettings settings("MyPetApp", "DesktopPet");
             settings.setValue("apiAddress", apiAddress);
             settings.setValue("modelName", modelName);
-            settings.setValue("scaleFactor", newScale);
+            settings.setValue("scaleFactor", newScaleValue);
 
-            if (!qFuzzyCompare(newScale, scaleFactor)) {
-                applyScale(newScale); // 觸發大小變更
+            if (!qFuzzyCompare(newScaleValue, scaleFactor)) {
+                pendingScale = true; // 標記需要縮放，但不立刻執行
             }
 
-            dialog.accept();
+            dialog->accept(); // 關閉視窗
             });
 
-        dialog.exec();
-    }
+        dialog->exec(); // 程式會停在這裡，直到設定視窗關閉
 
+        // 🔥 核心修復：等設定視窗「完全關閉」後，再來改變主視窗大小，徹底消滅 Crash！
+        if (pendingScale) {
+            applyScale(newScaleValue);
+        }
+
+        dialog->deleteLater();
+    }
 protected:
     void mousePressEvent(QMouseEvent* event) override {
         if (event->button() == Qt::LeftButton) {
@@ -359,13 +371,14 @@ protected:
 
         connect(settingsAction, &QAction::triggered, this, &DesktopPet::openSettings);
         connect(logAction, &QAction::triggered, []() {
-            QString logFilePath = QFileInfo("pet_debug.log").absoluteFilePath();
+            // 🔥 使用絕對路徑
+            QString logFilePath = QCoreApplication::applicationDirPath() + "/pet_debug.log";
             QFile file(logFilePath);
 
             if (!file.exists()) {
                 if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
                     QTextStream out(&file);
-                    out << "[資訊] 日誌檔案已建立。" << Qt::endl;
+                    out << "[資訊] 日誌檔案沒有找到。" << Qt::endl;
                     file.close();
                 }
             }
@@ -378,11 +391,12 @@ protected:
 };
 
 int main(int argc, char* argv[]) {
-    qInstallMessageHandler(customMessageHandler);
+    // 🔥 必須先初始化 app，才能註冊 MessageHandler
     QApplication app(argc, argv);
+    qInstallMessageHandler(customMessageHandler);
+
     DesktopPet pet;
     pet.show();
     return app.exec();
 }
-
 #include "Main.moc"
