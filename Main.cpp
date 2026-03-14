@@ -27,15 +27,15 @@
 #include <QUrl>
 #include <QDebug>
 
-void customMessageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg) {
+void customMessageHandler(QtMsgType type, const QMessageLogContext& context, const QString& msg) {
     Q_UNUSED(context);
     QString txt;
     switch (type) {
-        case QtDebugMsg:    txt = QString("[除錯] %1").arg(msg); break;
-        case QtWarningMsg:  txt = QString("[警告] %1").arg(msg); break;
-        case QtCriticalMsg: txt = QString("[嚴重] %1").arg(msg); break;
-        case QtFatalMsg:    txt = QString("[致命] %1").arg(msg); abort();
-        case QtInfoMsg:     txt = QString("[資訊] %1").arg(msg); break;
+    case QtDebugMsg:    txt = QString("[除錯] %1").arg(msg); break;
+    case QtWarningMsg:  txt = QString("[警告] %1").arg(msg); break;
+    case QtCriticalMsg: txt = QString("[嚴重] %1").arg(msg); break;
+    case QtFatalMsg:    txt = QString("[致命] %1").arg(msg); abort();
+    case QtInfoMsg:     txt = QString("[資訊] %1").arg(msg); break;
     }
     QFile outFile("pet_debug.log");
     outFile.open(QIODevice::WriteOnly | QIODevice::Append);
@@ -47,15 +47,15 @@ class DesktopPet : public QMainWindow {
     Q_OBJECT
 
 private:
-    QWidget *centralWidget;
-    QLabel *imageLabel;
-    QLabel *speechLabel;
+    QWidget* centralWidget;
+    QLabel* imageLabel;
+    QLabel* speechLabel;
     QPoint oldPos;
-    
-    QTimer *checkTimer;      
-    QTimer *idleTimer;       
-    QNetworkAccessManager *networkManager;
-    
+
+    QTimer* checkTimer;
+    QTimer* idleTimer;
+    QNetworkAccessManager* networkManager;
+
     QString apiAddress;
     QString modelName;
 
@@ -68,7 +68,7 @@ private:
     const int APP_WIDTH = 350;
 
 public:
-    DesktopPet(QWidget *parent = nullptr) : QMainWindow(parent) {
+    DesktopPet(QWidget* parent = nullptr) : QMainWindow(parent) {
         setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint | Qt::Tool);
         setAttribute(Qt::WA_TranslucentBackground);
 
@@ -84,7 +84,7 @@ public:
         speechLabel->setStyleSheet(
             "QLabel {"
             "color: white; "
-            "background-color: rgba(255, 105, 180, 210); " 
+            "background-color: rgba(255, 105, 180, 210); "
             "border-radius: 12px; "
             "padding: 16px; "
             "font-family: 'Microsoft JhengHei', 'PingFang TC', sans-serif; "
@@ -99,14 +99,15 @@ public:
         pixmapCheer = QPixmap("Idle-Happy.png").scaled(200, 300, Qt::KeepAspectRatio, Qt::SmoothTransformation);
         pixmapJump = QPixmap("Happy-Jump.png").scaled(200, 300, Qt::KeepAspectRatio, Qt::SmoothTransformation);
         pixmapTurn = QPixmap("Happy-Jump-Back.png").scaled(200, 300, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        
+
         imageLabel = new QLabel(centralWidget);
         imageLabel->setFixedSize(200, 300);
-        imageLabel->setAlignment(Qt::AlignCenter); 
+        imageLabel->setAlignment(Qt::AlignCenter);
 
         if (!pixmapIdle.isNull()) {
             imageLabel->setPixmap(pixmapIdle);
-        } else {
+        }
+        else {
             imageLabel->setText("🐱\n(找不到素材檔案)");
             imageLabel->setStyleSheet("font-size: 50px; color: pink;");
         }
@@ -115,57 +116,60 @@ public:
 
         checkTimer = new QTimer(this);
         connect(checkTimer, &QTimer::timeout, this, &DesktopPet::proactiveGreeting);
-        checkTimer->start(300000); 
+        checkTimer->start(300000);
 
         idleTimer = new QTimer(this);
-        idleTimer->setSingleShot(true); 
+        idleTimer->setSingleShot(true);
         connect(idleTimer, &QTimer::timeout, this, [this]() {
             imageLabel->setPixmap(pixmapIdle);
             updateStateText("等待主人的指令喵...");
-        });
-        
+            });
+
         // 初始狀態文字
         updateStateText("喵... 主人好...");
     }
 
     void updateStateText(const QString& newText) {
         speechLabel->setText(newText);
-        speechLabel->adjustSize(); // 讓氣泡先算出自己該有多高多寬
 
-        // 🔥【手動排版魔法】：每次文字改變後，重新計算並調整整個視窗和元件的位置
-        
-        int speechWidth = APP_WIDTH; // 氣泡固定寬度
-        // 如果字很少，氣泡可以窄一點；如果字很多，最大寬度就是 APP_WIDTH
-        if (speechLabel->sizeHint().width() < APP_WIDTH) {
-             speechWidth = speechLabel->sizeHint().width() + 32; // 加上 padding 的空間
+        speechLabel->setFixedSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX);
+        speechLabel->adjustSize();
+
+        if (speechLabel->width() > APP_WIDTH) {
+            speechLabel->setFixedWidth(APP_WIDTH);
+            speechLabel->adjustSize();
         }
-        
-        // 1. 設定氣泡的新尺寸
-        speechLabel->setFixedSize(speechWidth, speechLabel->sizeHint().height());
 
-        // 2. 決定貓娘圖片和氣泡的位置
-        // 讓圖片水平置中
-        int imageX = (APP_WIDTH - 200) / 2; 
-        
-        // 讓氣泡水平置中
+        int speechWidth = speechLabel->width();
+        int speechHeight = speechLabel->height();
+
+        int imageX = (APP_WIDTH - 200) / 2;
         int speechX = (APP_WIDTH - speechWidth) / 2;
-        
-        // 總高度 = 氣泡高度 + 貓娘高度 + 一點點間距
-        int totalHeight = speechLabel->height() + 300 + 10; 
 
-        // 3. 調整主視窗尺寸
+        int totalHeight = speechHeight + 300 + 10;
+
+        // 🔥 重點修復：記錄調整前的高度，並計算高度差
+        int oldHeight = this->height();
+        int heightDiff = totalHeight - oldHeight;
+
+        // 調整主視窗與中央元件尺寸
         this->setFixedSize(APP_WIDTH, totalHeight);
         centralWidget->setFixedSize(APP_WIDTH, totalHeight);
 
-        // 4. 移動氣泡和圖片到正確的座標 (X, Y)
-        speechLabel->move(speechX, 0); // 氣泡貼著最上面
-        imageLabel->move(imageX, speechLabel->height() + 10); // 貓娘在氣泡下方 10 像素
+        // 🔥 重點修復：如果視窗已經在畫面上顯示了，就把視窗往上(或往下)平移，抵銷高度變化
+        if (this->isVisible() && heightDiff != 0) {
+            this->move(this->x(), this->y() - heightDiff);
+        }
+
+        // 移動氣泡和圖片到正確的座標
+        speechLabel->move(speechX, 0);
+        imageLabel->move(imageX, speechHeight + 10);
     }
 
     void updateState(const QPixmap& newImage, const QString& newText) {
         imageLabel->setPixmap(newImage);
         updateStateText(newText);
-        idleTimer->stop(); 
+        idleTimer->stop();
     }
 
     void askOllama(const QString& userInput) {
@@ -190,31 +194,32 @@ public:
         QString fullPrompt = systemPrompt + "\n主人剛剛的動作或說的話：" + userInput + "\n請回覆：";
 
         QJsonObject jsonBody;
-        jsonBody["model"] = modelName; 
+        jsonBody["model"] = modelName;
         jsonBody["prompt"] = fullPrompt;
         jsonBody["stream"] = false;
 
         QByteArray data = QJsonDocument(jsonBody).toJson();
-        QNetworkReply *reply = networkManager->post(request, data);
+        QNetworkReply* reply = networkManager->post(request, data);
 
         connect(reply, &QNetworkReply::finished, this, [this, reply]() {
             if (reply->error() == QNetworkReply::NoError) {
                 QByteArray responseData = reply->readAll();
                 QJsonDocument jsonResponse = QJsonDocument::fromJson(responseData);
                 QString replyText = jsonResponse.object()["response"].toString();
-                
+
                 updateState(pixmapCheer, replyText);
-                
+
                 int displayTimeMs = 3000 + (replyText.length() * 250);
                 if (displayTimeMs < 5000) displayTimeMs = 5000;
                 if (displayTimeMs > 30000) displayTimeMs = 30000;
-                idleTimer->start(displayTimeMs); 
-            } else {
+                idleTimer->start(displayTimeMs);
+            }
+            else {
                 updateState(pixmapIdle, "呼... 呼... (連線中斷喵... 檢查一下設定？)");
                 idleTimer->start(8000);
             }
             reply->deleteLater();
-        });
+            });
     }
 
     void proactiveGreeting() {
@@ -223,21 +228,21 @@ public:
     }
 
     void openSettings() {
-        QDialog dialog(nullptr); 
+        QDialog dialog(nullptr);
         dialog.setWindowFlags(Qt::Dialog | Qt::WindowCloseButtonHint | Qt::WindowStaysOnTopHint);
-        
+
         dialog.setWindowTitle("寵物設定");
         dialog.setStyleSheet("background-color: white;");
 
         QFormLayout form(&dialog);
 
-        QLineEdit *urlInput = new QLineEdit(apiAddress, &dialog);
-        QLineEdit *modelInput = new QLineEdit(modelName, &dialog);
+        QLineEdit* urlInput = new QLineEdit(apiAddress, &dialog);
+        QLineEdit* modelInput = new QLineEdit(modelName, &dialog);
 
         form.addRow("Ollama API 地址:", urlInput);
         form.addRow("AI 模型名稱:", modelInput);
 
-        QPushButton *saveButton = new QPushButton("儲存設定", &dialog);
+        QPushButton* saveButton = new QPushButton("儲存設定", &dialog);
         form.addRow(saveButton);
 
         connect(saveButton, &QPushButton::clicked, [&]() {
@@ -249,51 +254,64 @@ public:
             settings.setValue("modelName", modelName);
 
             dialog.accept();
-        });
+            });
 
         dialog.exec();
     }
 
 protected:
-    void mousePressEvent(QMouseEvent *event) override {
+    void mousePressEvent(QMouseEvent* event) override {
         if (event->button() == Qt::LeftButton) {
             oldPos = event->globalPosition().toPoint();
         }
     }
 
-    void mouseMoveEvent(QMouseEvent *event) override {
-        if (!oldPos.isNull()) {
+    void mouseMoveEvent(QMouseEvent* event) override {
+        // 加入按鍵狀態檢查，防止未按住時觸發拖曳
+        if ((event->buttons() & Qt::LeftButton) && !oldPos.isNull()) {
             QPoint delta = event->globalPosition().toPoint() - oldPos;
             move(x() + delta.x(), y() + delta.y());
             oldPos = event->globalPosition().toPoint();
         }
     }
 
-    void mouseDoubleClickEvent(QMouseEvent *event) override {
+    // 🔥 新增：釋放滑鼠時清空座標，避免下次點擊時發生瞬移
+    void mouseReleaseEvent(QMouseEvent* event) override {
+        if (event->button() == Qt::LeftButton) {
+            oldPos = QPoint();
+        }
+    }
+
+    void mouseDoubleClickEvent(QMouseEvent* event) override {
         Q_UNUSED(event);
         updateState(pixmapJump, "感受著主人的觸碰... (思考中)");
         askOllama("主人剛剛用手摸了你的頭和耳朵，請給出反應。");
     }
 
-    void contextMenuEvent(QContextMenuEvent *event) override {
-        QMenu menu(this);
-        menu.setStyleSheet("background-color: white;"); 
+    void contextMenuEvent(QContextMenuEvent* event) override {
+        // 🔥 右鍵修復：移除 this，不繼承主視窗的透明屬性
+        QMenu menu;
+        // 明確指定背景與文字顏色，避免被系統深色模式或透明度干擾
+        menu.setStyleSheet(
+            "QMenu { background-color: white; color: black; border: 1px solid gray; }"
+            "QMenu::item:selected { background-color: #ffb6c1; color: black; }"
+        );
 
-        QAction *settingsAction = menu.addAction("設定 (Settings)");
-        QAction *logAction = menu.addAction("開啟除錯日誌 (Open Log)"); 
-        QAction *quitAction = menu.addAction("離開 (Quit)");
+        QAction* settingsAction = menu.addAction("設定 (Settings)");
+        QAction* logAction = menu.addAction("開啟除錯日誌 (Open Log)");
+        QAction* quitAction = menu.addAction("離開 (Quit)");
 
         connect(settingsAction, &QAction::triggered, this, &DesktopPet::openSettings);
-        connect(logAction, &QAction::triggered, [](){
+        connect(logAction, &QAction::triggered, []() {
             QDesktopServices::openUrl(QUrl::fromLocalFile("pet_debug.log"));
-        });
+            });
         connect(quitAction, &QAction::triggered, qApp, &QCoreApplication::quit);
 
         menu.exec(event->globalPos());
     }
 };
 
-int main(int argc, char *argv[]) {
+int main(int argc, char* argv[]) {
     qInstallMessageHandler(customMessageHandler);
     QApplication app(argc, argv);
     DesktopPet pet;
