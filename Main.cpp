@@ -78,32 +78,33 @@ public:
         QVBoxLayout *layout = new QVBoxLayout(centralWidget);
         layout->setAlignment(Qt::AlignCenter);
         
-        speechLabel = new QLabel(this);
+speechLabel = new QLabel(this);
         
-        // 🔥【排版優化 1】：指定易讀字體、放大字體(14px)、加寬內邊距(padding)
+        // 🔥【關鍵修復】：告訴排版引擎「垂直方向請盡量伸展，絕對不要壓縮我！」
+        speechLabel->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::MinimumExpanding);
+        
         speechLabel->setStyleSheet(
             "QLabel {"
             "color: white; "
-            "background-color: rgba(255, 105, 180, 210); " // 稍微調高不透明度，讓字更清晰
+            "background-color: rgba(255, 105, 180, 210); " 
             "border-radius: 12px; "
-            "padding: 12px 16px; " // 上下 12px，左右 16px
+            "padding: 16px; " // 四周都給 16px 的寬裕空間，防切字
             "font-family: 'Microsoft JhengHei', 'PingFang TC', sans-serif; "
-            "font-size: 14px; "
+            "font-size: 15px; " // 字體再稍微放大一點點，提高閱讀性
             "font-weight: bold;"
             "}"
         );
         speechLabel->setAlignment(Qt::AlignCenter);
         speechLabel->setWordWrap(true);
         speechLabel->setMinimumWidth(200);
-        speechLabel->setMaximumWidth(350); // 🔥 防止文字太長時氣泡變得無限寬
+        speechLabel->setMaximumWidth(350);
 
-        pixmapIdle = QPixmap("Idle.png").scaled(200, 200, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        pixmapCheer = QPixmap("Idle-Happy.png").scaled(200, 200, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        pixmapJump = QPixmap("Happy-Jump.png").scaled(200, 200, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        pixmapTurn = QPixmap("Happy-Jump-Back.png").scaled(200, 200, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-
+        pixmapIdle = QPixmap("Idle.png").scaled(200, 300, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        pixmapCheer = QPixmap("Idle-Happy.png").scaled(200, 300, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        pixmapJump = QPixmap("Happy-Jump.png").scaled(200, 300, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        pixmapTurn = QPixmap("Happy-Jump-Back.png").scaled(200, 300, Qt::KeepAspectRatio, Qt::SmoothTransformation);
         imageLabel = new QLabel(this);
-        imageLabel->setFixedSize(200, 200); 
+        imageLabel->setFixedSize(300, 450);
         
         // 🔥【復原優化】：讓貓娘的腳永遠貼在框框底部，切換圖片時不會浮空
         imageLabel->setAlignment(Qt::AlignBottom | Qt::AlignHCenter); 
@@ -137,13 +138,12 @@ public:
         updateStateText("喵... 主人好...");
     }
 
-    // 🔥【排版優化 2】：專門處理文字，強制轉成 HTML 並加上 150% 的行距！
     void updateStateText(const QString& newText) {
-        // 先將普通的換行符號轉成 HTML 的 <br>
-        QString safeText = newText.toHtmlEscaped().replace("\n", "<br>");
-        // 用 div 包起來，強制設定行距
-        QString formattedText = QString("<div style='line-height: 150%;'>%1</div>").arg(safeText);
-        speechLabel->setText(formattedText);
+        // 回歸純文字，讓 Qt 能夠 100% 精準計算高度
+        speechLabel->setText(newText);
+        
+        // 🔥【關鍵修復】：文字塞進去之後，強制氣泡框重新適應大小
+        speechLabel->adjustSize(); 
     }
 
     void updateState(const QPixmap& newImage, const QString& newText) {
