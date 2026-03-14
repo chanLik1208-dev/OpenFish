@@ -16,7 +16,7 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Network)
 
 # === 關鍵在這裡！確保整個檔案只有這一行 add_executable ===
 # WIN32 負責隱藏 Windows 黑視窗，MACOSX_BUNDLE 負責打包 Mac 的 .app
-add_executable(DesktopPet WIN32 MACOSX_BUNDLE Main.cpp)
+add_executable(DesktopPet WIN32 MACOSX_BUNDLE Main.cpp resources.qrc)
 
 # 連結 Qt 函式庫
 target_link_libraries(DesktopPet PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network)

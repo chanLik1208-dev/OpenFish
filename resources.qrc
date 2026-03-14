@@ -1,0 +1,9 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+<qresource prefix="/images">
+    <file>Idle.png</file>
+    <file>Idle-Happy.png</file>
+    <file>Happy-Jump.png</file>
+    <file>Happy-Jump-Back.png</file>
+</qresource>
+</RCC>
