@@ -26,6 +26,8 @@
 #include <QDesktopServices>
 #include <QUrl>
 #include <QDebug>
+#include <QComboBox>
+#include <QFileInfo>
 
 void customMessageHandler(QtMsgType type, const QMessageLogContext& context, const QString& msg) {
     Q_UNUSED(context);
@@ -64,8 +66,8 @@ private:
     QPixmap pixmapJump;
     QPixmap pixmapTurn;
 
-    // 定義主視窗的固定寬度
-    const int APP_WIDTH = 350;
+    // 🔥 新增：儲存目前的縮放比例 (1.0 = 100%)
+    double scaleFactor = 1.0;
 
 public:
     DesktopPet(QWidget* parent = nullptr) : QMainWindow(parent) {
@@ -75,43 +77,17 @@ public:
         QSettings settings("MyPetApp", "DesktopPet");
         apiAddress = settings.value("apiAddress", "http://localhost:11434/api/generate").toString();
         modelName = settings.value("modelName", "llama3").toString();
+        scaleFactor = settings.value("scaleFactor", 1.0).toDouble(); // 讀取縮放設定
 
         centralWidget = new QWidget(this);
-        // 🔥【重點】：不再使用 QVBoxLayout！改用絕對定位。
         setCentralWidget(centralWidget);
 
         speechLabel = new QLabel(centralWidget);
-        speechLabel->setStyleSheet(
-            "QLabel {"
-            "color: white; "
-            "background-color: rgba(255, 105, 180, 210); "
-            "border-radius: 12px; "
-            "padding: 16px; "
-            "font-family: 'Microsoft JhengHei', 'PingFang TC', sans-serif; "
-            "font-size: 15px; "
-            "font-weight: bold;"
-            "}"
-        );
         speechLabel->setAlignment(Qt::AlignCenter);
         speechLabel->setWordWrap(true);
 
-        // 確保路徑前面有 :/images/
-        pixmapIdle = QPixmap(":/images/Idle.png").scaled(200, 300, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        pixmapCheer = QPixmap(":/images/Idle-Happy.png").scaled(200, 300, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        pixmapJump = QPixmap(":/images/Happy-Jump.png").scaled(200, 300, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        pixmapTurn = QPixmap(":/images/Happy-Jump-Back.png").scaled(200, 300, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-
         imageLabel = new QLabel(centralWidget);
-        imageLabel->setFixedSize(200, 300);
         imageLabel->setAlignment(Qt::AlignCenter);
-
-        if (!pixmapIdle.isNull()) {
-            imageLabel->setPixmap(pixmapIdle);
-        }
-        else {
-            imageLabel->setText("🐱\n(找不到素材檔案)");
-            imageLabel->setStyleSheet("font-size: 50px; color: pink;");
-        }
 
         networkManager = new QNetworkAccessManager(this);
 
@@ -126,8 +102,54 @@ public:
             updateStateText("等待主人的指令喵...");
             });
 
-        // 初始狀態文字
+        // 🔥 初始化：套用目前的縮放比例並顯示
+        applyScale(scaleFactor);
         updateStateText("喵... 主人好...");
+    }
+
+    // 🔥 新增：動態調整所有元件大小的核心函式
+    void applyScale(double newScale) {
+        scaleFactor = newScale;
+
+        // 1. 計算縮放後的圖片尺寸 (原圖基準：寬 200, 高 300)
+        int imgW = 200 * scaleFactor;
+        int imgH = 300 * scaleFactor;
+
+        // 2. 重新讀取並縮放圖片
+        pixmapIdle = QPixmap(":/images/Idle.png").scaled(imgW, imgH, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        pixmapCheer = QPixmap(":/images/Idle-Happy.png").scaled(imgW, imgH, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        pixmapJump = QPixmap(":/images/Happy-Jump.png").scaled(imgW, imgH, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        pixmapTurn = QPixmap(":/images/Happy-Jump-Back.png").scaled(imgW, imgH, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+
+        imageLabel->setFixedSize(imgW, imgH);
+
+        if (pixmapIdle.isNull()) {
+            imageLabel->setText("🐱\n(找不到素材檔案)");
+            imageLabel->setStyleSheet(QString("font-size: %1px; color: pink;").arg(50 * scaleFactor));
+        }
+        else {
+            imageLabel->setPixmap(pixmapIdle);
+        }
+
+        // 3. 計算並套用氣泡框的文字與 padding 縮放 (確保字體不會小於 9px)
+        int fontSize = qMax(9, int(15 * scaleFactor));
+        int padding = int(16 * scaleFactor);
+        int borderRadius = int(12 * scaleFactor);
+
+        speechLabel->setStyleSheet(QString(
+            "QLabel {"
+            "color: white; "
+            "background-color: rgba(255, 105, 180, 210); "
+            "border-radius: %1px; "
+            "padding: %2px; "
+            "font-family: 'Microsoft JhengHei', 'PingFang TC', sans-serif; "
+            "font-size: %3px; "
+            "font-weight: bold;"
+            "}"
+        ).arg(borderRadius).arg(padding).arg(fontSize));
+
+        // 4. 觸發畫面排版更新
+        updateStateText(speechLabel->text());
     }
 
     void updateStateText(const QString& newText) {
@@ -136,35 +158,38 @@ public:
         speechLabel->setFixedSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX);
         speechLabel->adjustSize();
 
-        if (speechLabel->width() > APP_WIDTH) {
-            speechLabel->setFixedWidth(APP_WIDTH);
+        // 🔥 動態計算視窗最大寬度 (基準：350)
+        int currentAppWidth = 350 * scaleFactor;
+
+        if (speechLabel->width() > currentAppWidth) {
+            speechLabel->setFixedWidth(currentAppWidth);
             speechLabel->adjustSize();
         }
 
         int speechWidth = speechLabel->width();
         int speechHeight = speechLabel->height();
 
-        int imageX = (APP_WIDTH - 200) / 2;
-        int speechX = (APP_WIDTH - speechWidth) / 2;
+        int imgW = 200 * scaleFactor;
+        int imgH = 300 * scaleFactor;
 
-        int totalHeight = speechHeight + 300 + 10;
+        int imageX = (currentAppWidth - imgW) / 2;
+        int speechX = (currentAppWidth - speechWidth) / 2;
 
-        // 🔥 重點修復：記錄調整前的高度，並計算高度差
+        int spacing = 10 * scaleFactor; // 圖片與氣泡的間距也要縮放
+        int totalHeight = speechHeight + imgH + spacing;
+
         int oldHeight = this->height();
         int heightDiff = totalHeight - oldHeight;
 
-        // 調整主視窗與中央元件尺寸
-        this->setFixedSize(APP_WIDTH, totalHeight);
-        centralWidget->setFixedSize(APP_WIDTH, totalHeight);
+        this->setFixedSize(currentAppWidth, totalHeight);
+        centralWidget->setFixedSize(currentAppWidth, totalHeight);
 
-        // 🔥 重點修復：如果視窗已經在畫面上顯示了，就把視窗往上(或往下)平移，抵銷高度變化
         if (this->isVisible() && heightDiff != 0) {
             this->move(this->x(), this->y() - heightDiff);
         }
 
-        // 移動氣泡和圖片到正確的座標
         speechLabel->move(speechX, 0);
-        imageLabel->move(imageX, speechHeight + 10);
+        imageLabel->move(imageX, speechHeight + spacing);
     }
 
     void updateState(const QPixmap& newImage, const QString& newText) {
@@ -240,8 +265,20 @@ public:
         QLineEdit* urlInput = new QLineEdit(apiAddress, &dialog);
         QLineEdit* modelInput = new QLineEdit(modelName, &dialog);
 
+        // 🔥 新增設定視窗內的縮放下拉選單
+        QComboBox* scaleCombo = new QComboBox(&dialog);
+        scaleCombo->addItem("50%", 0.5);
+        scaleCombo->addItem("75%", 0.75);
+        scaleCombo->addItem("100%", 1.0);
+        scaleCombo->addItem("150%", 1.5);
+        scaleCombo->addItem("200%", 2.0);
+
+        int idx = scaleCombo->findData(scaleFactor);
+        if (idx >= 0) scaleCombo->setCurrentIndex(idx);
+
         form.addRow("Ollama API 地址:", urlInput);
         form.addRow("AI 模型名稱:", modelInput);
+        form.addRow("寵物顯示大小:", scaleCombo);
 
         QPushButton* saveButton = new QPushButton("儲存設定", &dialog);
         form.addRow(saveButton);
@@ -249,10 +286,16 @@ public:
         connect(saveButton, &QPushButton::clicked, [&]() {
             apiAddress = urlInput->text();
             modelName = modelInput->text();
+            double newScale = scaleCombo->currentData().toDouble();
 
             QSettings settings("MyPetApp", "DesktopPet");
             settings.setValue("apiAddress", apiAddress);
             settings.setValue("modelName", modelName);
+            settings.setValue("scaleFactor", newScale);
+
+            if (!qFuzzyCompare(newScale, scaleFactor)) {
+                applyScale(newScale); // 觸發大小變更
+            }
 
             dialog.accept();
             });
@@ -268,7 +311,6 @@ protected:
     }
 
     void mouseMoveEvent(QMouseEvent* event) override {
-        // 加入按鍵狀態檢查，防止未按住時觸發拖曳
         if ((event->buttons() & Qt::LeftButton) && !oldPos.isNull()) {
             QPoint delta = event->globalPosition().toPoint() - oldPos;
             move(x() + delta.x(), y() + delta.y());
@@ -276,7 +318,6 @@ protected:
         }
     }
 
-    // 🔥 新增：釋放滑鼠時清空座標，避免下次點擊時發生瞬移
     void mouseReleaseEvent(QMouseEvent* event) override {
         if (event->button() == Qt::LeftButton) {
             oldPos = QPoint();
@@ -290,13 +331,27 @@ protected:
     }
 
     void contextMenuEvent(QContextMenuEvent* event) override {
-        // 🔥 右鍵修復：移除 this，不繼承主視窗的透明屬性
         QMenu menu;
-        // 明確指定背景與文字顏色，避免被系統深色模式或透明度干擾
         menu.setStyleSheet(
             "QMenu { background-color: white; color: black; border: 1px solid gray; }"
             "QMenu::item:selected { background-color: #ffb6c1; color: black; }"
         );
+
+        // 🔥 新增：在右鍵選單中加入「調整大小」子選單，方便快速切換
+        QMenu* sizeMenu = menu.addMenu("調整大小 (Size)");
+        QList<double> scales = { 0.5, 0.75, 1.0, 1.5, 2.0 };
+        for (double s : scales) {
+            QAction* act = sizeMenu->addAction(QString("%1%").arg(int(s * 100)));
+            act->setCheckable(true);
+            if (qFuzzyCompare(s, scaleFactor)) act->setChecked(true); // 勾選目前的大小
+
+            connect(act, &QAction::triggered, this, [this, s]() {
+                QSettings settings("MyPetApp", "DesktopPet");
+                settings.setValue("scaleFactor", s);
+                applyScale(s); // 立刻套用新大小
+                });
+        }
+        menu.addSeparator(); // 加一條分隔線會比較好看
 
         QAction* settingsAction = menu.addAction("設定 (Settings)");
         QAction* logAction = menu.addAction("開啟除錯日誌 (Open Log)");
@@ -304,7 +359,17 @@ protected:
 
         connect(settingsAction, &QAction::triggered, this, &DesktopPet::openSettings);
         connect(logAction, &QAction::triggered, []() {
-            QDesktopServices::openUrl(QUrl::fromLocalFile("pet_debug.log"));
+            QString logFilePath = QFileInfo("pet_debug.log").absoluteFilePath();
+            QFile file(logFilePath);
+
+            if (!file.exists()) {
+                if (file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+                    QTextStream out(&file);
+                    out << "[資訊] 日誌檔案已建立。" << Qt::endl;
+                    file.close();
+                }
+            }
+            QDesktopServices::openUrl(QUrl::fromLocalFile(logFilePath));
             });
         connect(quitAction, &QAction::triggered, qApp, &QCoreApplication::quit);
 
