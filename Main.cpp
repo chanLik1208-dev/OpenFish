@@ -96,7 +96,7 @@ speechLabel = new QLabel(this);
         );
         speechLabel->setAlignment(Qt::AlignCenter);
         speechLabel->setWordWrap(true);
-        speechLabel->setMinimumWidth(200);
+        speechLabel->setMinimumWidth(150);
         speechLabel->setMaximumWidth(350);
 
         pixmapIdle = QPixmap("Idle.png").scaled(200, 300, Qt::KeepAspectRatio, Qt::SmoothTransformation);
@@ -104,7 +104,7 @@ speechLabel = new QLabel(this);
         pixmapJump = QPixmap("Happy-Jump.png").scaled(200, 300, Qt::KeepAspectRatio, Qt::SmoothTransformation);
         pixmapTurn = QPixmap("Happy-Jump-Back.png").scaled(200, 300, Qt::KeepAspectRatio, Qt::SmoothTransformation);
         imageLabel = new QLabel(this);
-        imageLabel->setFixedSize(200, 225);
+        imageLabel->setFixedSize(200, 255);
         
         // 🔥【復原優化】：讓貓娘的腳永遠貼在框框底部，切換圖片時不會浮空
         imageLabel->setAlignment(Qt::AlignBottom | Qt::AlignHCenter); 
