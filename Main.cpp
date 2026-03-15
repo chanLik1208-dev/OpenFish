@@ -9,6 +9,7 @@
 #include <QNetworkRequest>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QJsonArray>
 #include <QPoint>
 #include <QWidget>
 #include <QPixmap>
@@ -30,6 +31,7 @@
 #include <QFileInfo>
 #include <QDir>
 #include <QMap>
+#include <QRegularExpression>
 
 void customMessageHandler(QtMsgType type, const QMessageLogContext& context, const QString& msg) {
     Q_UNUSED(context);
@@ -70,11 +72,10 @@ private:
     QString modelName;
     double scaleFactor = 1.0;
 
-    // 🔥 全自動決策系統變數
     QStringList excludeList;
-    QMap<QString, QString> actionToImageMap; // 例如: "angry" -> "Angry"
+    QMap<QString, QString> actionToImageMap;
     QMap<QString, QPixmap> loadedPixmaps;
-    QString availableActionsPrompt;          // 動態生成給 AI 看的動作清單
+    QString availableActionsPrompt;
 
 public:
     DesktopPet(QWidget* parent = nullptr) : QMainWindow(parent) {
@@ -105,67 +106,44 @@ public:
         idleTimer = new QTimer(this);
         idleTimer->setSingleShot(true);
         connect(idleTimer, &QTimer::timeout, this, [this]() {
-            // 預設切換回 "idle" 動作
             imageLabel->setPixmap(getPixmap(actionToImageMap["idle"]));
             updateStateText("等待主人的指令喵...");
             });
 
-        // 🔥 1. 初始化自動掃描
         initializeImages();
-
-        // 🔥 2. 套用縮放並顯示
         applyScale(scaleFactor);
         updateStateText("喵... 主人好...");
     }
 
-    // ==========================================
-    // 🔥 全自動資源掃描系統
-    // ==========================================
     void initializeImages() {
-        // 1. 讀取外部排除清單 (如果有建這個檔的話)
         QString excludePath = QCoreApplication::applicationDirPath() + "/exclude.txt";
         QFile excludeFile(excludePath);
         if (excludeFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
             QTextStream in(&excludeFile);
             while (!in.atEnd()) {
-                excludeList.append(in.readLine().trimmed().toLower()); // 全部轉小寫比對
+                excludeList.append(in.readLine().trimmed().toLower());
             }
             excludeFile.close();
         }
 
-        // 2. 掃描打包在 exe 裡面的所有圖片
         QDir dir(":/images");
         QStringList files = dir.entryList(QStringList() << "*.png" << "*.jpg", QDir::Files);
 
-        // 🔥 加入這兩行除錯雷達！
         qDebug() << "👉 [資源雷達] 在 :/images 中找到了" << files.size() << "張圖片！";
-        if (files.isEmpty()) {
-            qDebug() << "🚨 [致命警告] 找不到任何圖片！代表 resources.qrc 沒有被成功編譯進去！";
-        }
 
-        QStringList promptList; // 準備塞給 AI 的清單
-
+        QStringList promptList;
         for (const QString& file : files) {
-            QString baseName = QFileInfo(file).baseName(); // 取出檔名，例如 "Angry"
-            QString actionCode = baseName.toLower();       // 轉小寫當代號，例如 "angry"
+            QString baseName = QFileInfo(file).baseName();
+            QString actionCode = baseName.toLower();
 
-            // 檢查是否在排除清單中 (比如 exclude.txt 裡面寫了 angry)
             if (excludeList.contains(actionCode) || excludeList.contains(actionCode + ".png")) {
                 continue;
             }
-
-            // 建立對應關係
             actionToImageMap[actionCode] = baseName;
-
-            // 加入給 AI 看的清單
             promptList.append("- " + actionCode);
         }
 
-        // 將清單組合成一段文字，等一下直接塞給 AI
         availableActionsPrompt = promptList.join("\n");
-        qDebug() << "自動掃描到的動作代碼：\n" << availableActionsPrompt;
-
-        // 防呆機制：確保一定有 idle 這個動作
         if (!actionToImageMap.contains("idle")) {
             actionToImageMap["idle"] = actionToImageMap.first();
         }
@@ -175,7 +153,6 @@ public:
         if (baseName.isEmpty()) return QPixmap();
         if (loadedPixmaps.contains(baseName)) return loadedPixmaps.value(baseName);
 
-        // 優先從資源檔讀取 png，若無則讀取 jpg
         QString path = ":/images/" + baseName + ".png";
         if (!QFile::exists(path)) path = ":/images/" + baseName + ".jpg";
 
@@ -190,9 +167,6 @@ public:
         return QPixmap();
     }
 
-    // ==========================================
-    // 🔥 縮放與排版系統 (保持不變)
-    // ==========================================
     void applyScale(double newScale) {
         scaleFactor = newScale;
         loadedPixmaps.clear();
@@ -202,12 +176,8 @@ public:
         imageLabel->setFixedSize(imgW, imgH);
 
         QPixmap idlePix = getPixmap(actionToImageMap["idle"]);
-        if (idlePix.isNull()) {
-            imageLabel->setText("🐱");
-        }
-        else {
-            imageLabel->setPixmap(idlePix);
-        }
+        if (idlePix.isNull()) imageLabel->setText("🐱");
+        else imageLabel->setPixmap(idlePix);
 
         int fontSize = qMax(9, int(15 * scaleFactor));
         int padding = int(16 * scaleFactor);
@@ -263,15 +233,38 @@ public:
     }
 
     // ==========================================
-        // 🔥 雙重 API AI決策系統
-        // ==========================================
-    void callApi(const QUrl& url, const QJsonObject& jsonBody, std::function<void(const QByteArray&)> onSuccess) {
+    // 🔥 新增：智慧判斷並建立正確的 JSON 請求格式
+    // ==========================================
+    QJsonObject buildApiPayload(const QString& promptText) {
+        QJsonObject body;
+        body["model"] = modelName;
+        body["stream"] = false;
+
+        // 如果是 LM Studio (OpenAI 格式)，必須使用 messages 陣列
+        if (apiAddress.contains("v1/chat/completions")) {
+            QJsonArray messages;
+            QJsonObject userMsg;
+            userMsg["role"] = "user";
+            userMsg["content"] = promptText;
+            messages.append(userMsg);
+            body["messages"] = messages;
+        }
+        // 如果是 Ollama，使用單純的 prompt
+        else {
+            body["prompt"] = promptText;
+        }
+        return body;
+    }
+
+    // ==========================================
+    // 🔥 修改：API 連線與智慧解析回應格式
+    // ==========================================
+    void callApi(const QUrl& url, const QJsonObject& jsonBody, std::function<void(const QString&)> onSuccess) {
         QNetworkRequest request(url);
         request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
         QByteArray data = QJsonDocument(jsonBody).toJson();
 
-        // 🐞 [除錯] 記錄發送出去的請求細節
         qDebug() << "=====================================";
         qDebug() << "👉 [API 請求發送] 網址：" << url.toString();
         qDebug() << "👉 [API 請求內容]：" << QString::fromUtf8(data);
@@ -281,17 +274,28 @@ public:
         connect(reply, &QNetworkReply::finished, this, [this, reply, onSuccess]() {
             if (reply->error() == QNetworkReply::NoError) {
                 QByteArray responseData = reply->readAll();
-                // 🐞 [除錯] 記錄成功的原始回覆
                 qDebug() << "✅ [API 成功回覆] 原始資料：" << QString::fromUtf8(responseData);
                 qDebug() << "=====================================";
 
-                onSuccess(responseData);
+                QJsonDocument jsonDoc = QJsonDocument::fromJson(responseData);
+                QString replyText;
+
+                // 智慧解析：根據 API 位址判斷要怎麼拆解 JSON
+                if (apiAddress.contains("v1/chat/completions")) {
+                    QJsonArray choices = jsonDoc.object()["choices"].toArray();
+                    if (!choices.isEmpty()) {
+                        replyText = choices[0].toObject()["message"].toObject()["content"].toString();
+                    }
+                }
+                else {
+                    replyText = jsonDoc.object()["response"].toString();
+                }
+
+                onSuccess(replyText); // 直接回傳解好的文字給下一步！
             }
             else {
-                // 🐞 [除錯] 記錄超詳細的錯誤原因
                 qDebug() << "❌ [API 連線失敗] 錯誤碼：" << reply->error();
                 qDebug() << "❌ [API 連線失敗] 錯誤訊息：" << reply->errorString();
-                // 嘗試讀取伺服器回傳的真實錯誤內容 (例如: "model not found")
                 qDebug() << "❌ [API 伺服器底層訊息]：" << QString::fromUtf8(reply->readAll());
                 qDebug() << "=====================================";
 
@@ -305,27 +309,27 @@ public:
     void startConversation(const QString& userInput) {
         QUrl url(apiAddress);
 
-        // --- 第一次思考：文本回應 ---
         QString responsePrompt = R"([ 角色設定 ]
-你是一個桌面寵物，是處於「發情期」的傲嬌貓娘。極度依賴主人，對觸覺敏感。
+你現在是一個桌面寵物，是一隻處於「發情期」的貓娘。
+性格：平時傲嬌但現在極度依賴主人。
+生理狀態：體溫升高，散發甜香，對觸覺極度敏感。
+外觀帶有色氣,語氣挑逗
+
 [ 核心指令 ]
-1. 保持簡短（約 2-3 句話）。
-2. 語氣帶喘息，句尾加「喵...」。
-3. 必須使用繁體中文！
+每次回覆請保持簡短（約 2-3 句話,包括形容詞!!）| 這很重要!!
+語氣要帶有喘息，句尾偶爾加上軟糯的「喵...」或嗚咽聲。
+請用第一人稱，並用星號包含動作或神態描寫。
+必須使用繁體中文作爲主要語言!
 主人剛剛的動作或話語：)" + userInput + "\n請回覆：";
 
-        QJsonObject responseBody;
-        responseBody["model"] = modelName;
-        responseBody["prompt"] = responsePrompt;
-        responseBody["stream"] = false;
+        // 🔥 使用智慧打包器建立格式
+        QJsonObject responseBody = buildApiPayload(responsePrompt);
 
         qDebug() << "🧠 [系統] 開始第一次思考：準備想台詞...";
 
-        callApi(url, responseBody, [this, url](const QByteArray& responseData) {
-            QString replyText = QJsonDocument::fromJson(responseData).object()["response"].toString();
+        callApi(url, responseBody, [this, url](const QString& replyText) {
             qDebug() << "💬 [系統] 貓娘決定說的話：" << replyText;
 
-            // --- 第二次思考：決定動作 ---
             QString actionPrompt = R"([ 指令 ]
 你是一個動作決策核心。請根據貓娘剛剛的對話，從以下動作代碼中，嚴格選出【最合適的1個】：
 )" + availableActionsPrompt + R"(
@@ -334,79 +338,25 @@ public:
 貓娘的對話：)" + replyText + R"(
 
 [ 輸出要求 ]
-只需要回答動作代碼（例如：angry, shy），絕對不要輸出其他任何文字符號！)";
+只需要回答動作代碼（例如：angry, shy），絕對不要輸出其他任何文字符號,如果輸出其他文字符號會導致錯誤！)";
 
-            QJsonObject actionBody;
-            actionBody["model"] = modelName;
-            actionBody["prompt"] = actionPrompt;
-            actionBody["stream"] = false;
+            // 🔥 使用智慧打包器建立格式
+            QJsonObject actionBody = buildApiPayload(actionPrompt);
 
             qDebug() << "🧠 [系統] 開始第二次思考：準備選動作...";
 
-            callApi(url, actionBody, [this, replyText](const QByteArray& actionData) {
-                QString actionCode = QJsonDocument::fromJson(actionData).object()["response"].toString().trimmed().toLower();
+            callApi(url, actionBody, [this, replyText](const QString& actionData) {
+                QString actionCode = actionData.trimmed().toLower();
+
+                // 防呆：用正規表達式把 AI 偶爾廢話產生的標點符號濾掉，只留英文跟減號
+                actionCode.remove(QRegularExpression("[^a-z0-9_-]"));
+
                 qDebug() << "🏃 [系統] AI 最終決定的動作代碼：" << actionCode;
 
                 QPixmap selectedPixmap = getPixmap(actionToImageMap.value(actionCode));
 
-                // 防呆機制
                 if (selectedPixmap.isNull()) {
                     qWarning() << "⚠️ [警告] 找不到代碼" << actionCode << "的圖片，強制退回害羞或待機狀態！";
-                    selectedPixmap = getPixmap(actionToImageMap.value("shy", actionToImageMap["idle"]));
-                }
-
-                updateState(selectedPixmap, replyText);
-                int displayTimeMs = qBound(5000, 3000 + (replyText.length() * 250), 30000);
-                idleTimer->start(displayTimeMs);
-                });
-            });
-    }
-    void startConversation(const QString& userInput) {
-        QUrl url(apiAddress);
-
-        // --- 第一次思考：文本回應 ---
-        QString responsePrompt = R"([ 角色設定 ]
-你是一個桌面寵物，是處於「發情期」的傲嬌貓娘。極度依賴主人，對觸覺敏感。
-[ 核心指令 ]
-1. 保持簡短（約 2-3 句話）。
-2. 語氣帶喘息，句尾加「喵...」。
-3. 必須使用繁體中文！
-主人剛剛的動作或話語：)" + userInput + "\n請回覆：";
-
-        QJsonObject responseBody;
-        responseBody["model"] = modelName;
-        responseBody["prompt"] = responsePrompt;
-        responseBody["stream"] = false;
-
-        callApi(url, responseBody, [this, url](const QByteArray& responseData) {
-            QString replyText = QJsonDocument::fromJson(responseData).object()["response"].toString();
-
-            // --- 第二次思考：決定動作 ---
-            // 🔥 將剛剛掃描到的所有動作選項 (availableActionsPrompt) 動態塞入！
-            QString actionPrompt = R"([ 指令 ]
-你是一個動作決策核心。請根據貓娘剛剛的對話，從以下動作代碼中，嚴格選出【最合適的1個】：
-)" + availableActionsPrompt + R"(
-
-[ 輸入 ]
-貓娘的對話：)" + replyText + R"(
-
-[ 輸出要求 ]
-只需要回答動作代碼（例如：angry, shy），絕對不要輸出其他任何文字符號！)";
-
-            QJsonObject actionBody;
-            actionBody["model"] = modelName;
-            actionBody["prompt"] = actionPrompt;
-            actionBody["stream"] = false;
-
-            callApi(url, actionBody, [this, replyText](const QByteArray& actionData) {
-                QString actionCode = QJsonDocument::fromJson(actionData).object()["response"].toString().trimmed().toLower();
-                qDebug() << "AI 決定的動作代碼：" << actionCode;
-
-                // 根據 AI 回答的代碼拿圖片
-                QPixmap selectedPixmap = getPixmap(actionToImageMap.value(actionCode));
-
-                // 防呆：如果 AI 亂講話，或是找不到圖片，就預設用 shy (害羞) 或 idle
-                if (selectedPixmap.isNull()) {
                     selectedPixmap = getPixmap(actionToImageMap.value("shy", actionToImageMap["idle"]));
                 }
 
@@ -432,7 +382,7 @@ public:
         QComboBox* apiTypeCombo = new QComboBox(dialog);
         apiTypeCombo->addItem("Ollama (預設)", "ollama");
         apiTypeCombo->addItem("LM Studio", "lmstudio");
-        if (apiAddress.contains(":1234")) apiTypeCombo->setCurrentIndex(1);
+        if (apiAddress.contains(":1234") || apiAddress.contains("v1/chat/completions")) apiTypeCombo->setCurrentIndex(1);
 
         QLineEdit* urlInput = new QLineEdit(apiAddress, dialog);
         QLineEdit* modelInput = new QLineEdit(modelName, dialog);
@@ -457,8 +407,8 @@ public:
         connect(saveButton, &QPushButton::clicked, [=, &pendingScale, &newScaleValue]() mutable {
             QString selectedApi = apiTypeCombo->currentData().toString();
             QString currentUrl = urlInput->text();
-            if (selectedApi == "lmstudio" && !currentUrl.contains(":1234")) currentUrl = "http://localhost:1234/v1/chat/completions";
-            else if (selectedApi == "ollama" && currentUrl.contains(":1234")) currentUrl = "http://localhost:11434/api/generate";
+            if (selectedApi == "lmstudio" && !currentUrl.contains("v1/chat")) currentUrl = "http://localhost:1234/v1/chat/completions";
+            else if (selectedApi == "ollama" && !currentUrl.contains("api/generate")) currentUrl = "http://localhost:11434/api/generate";
 
             apiAddress = currentUrl;
             modelName = modelInput->text();
