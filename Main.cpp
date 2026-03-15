@@ -33,18 +33,26 @@ void customMessageHandler(QtMsgType type, const QMessageLogContext& context, con
     Q_UNUSED(context);
     QString txt;
     switch (type) {
-    case QtDebugMsg:    txt = QString("[除錯] %1").arg(msg); break;
-    case QtWarningMsg:  txt = QString("[警告] %1").arg(msg); break;
-    case QtCriticalMsg: txt = QString("[嚴重] %1").arg(msg); break;
-    case QtFatalMsg:    txt = QString("[致命] %1").arg(msg); abort();
-    case QtInfoMsg:     txt = QString("[資訊] %1").arg(msg); break;
+        case QtDebugMsg:    txt = QString("[除錯] %1").arg(msg); break;
+        case QtWarningMsg:  txt = QString("[警告] %1").arg(msg); break;
+        case QtCriticalMsg: txt = QString("[嚴重] %1").arg(msg); break;
+        case QtFatalMsg:    txt = QString("[致命] %1").arg(msg); abort();
+        case QtInfoMsg:     txt = QString("[資訊] %1").arg(msg); break;
     }
-    // 🔥 強制將日誌寫在執行檔同一個資料夾，確保紀錄不會分散
+
+    // 🔥 獲取程式路徑，並確保檔案名稱正確
     QString logPath = QCoreApplication::applicationDirPath() + "/pet_debug.log";
     QFile outFile(logPath);
-    outFile.open(QIODevice::WriteOnly | QIODevice::Append);
-    QTextStream ts(&outFile);
-    ts << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz ") << txt << Qt::endl;
+    
+    // 使用 Append (附加) 模式，如果檔案不存在會自動建立
+    if (outFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+        QTextStream ts(&outFile);
+        // 設定編碼為 UTF-8，防止中文亂碼
+        ts.setEncoding(QStringConverter::Utf8); 
+        ts << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz ") << txt << Qt::endl;
+        ts.flush();
+        outFile.close();
+    }
 }
 
 class DesktopPet : public QMainWindow {
