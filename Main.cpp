@@ -28,7 +28,7 @@
 #include <QDebug>
 #include <QComboBox>
 #include <QFileInfo>
-//
+
 void customMessageHandler(QtMsgType type, const QMessageLogContext& context, const QString& msg) {
     Q_UNUSED(context);
     QString txt;
@@ -212,7 +212,7 @@ public:
         QUrl url(apiAddress);
         QNetworkRequest request(url);
         request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
-
+        qDebug() << "準備發送 API 請求至:" << url.toString(); 
         QString systemPrompt = R"(
 [ 角色設定 ]
 你現在是一個桌面寵物，是一隻處於「發情期」的貓娘。
@@ -242,7 +242,7 @@ public:
                 QByteArray responseData = reply->readAll();
                 QJsonDocument jsonResponse = QJsonDocument::fromJson(responseData);
                 QString replyText = jsonResponse.object()["response"].toString();
-
+                qDebug() << "Ollama 成功回覆:" << replyText; 
                 updateState(pixmapCheer, replyText);
 
                 int displayTimeMs = 3000 + (replyText.length() * 250);
@@ -251,6 +251,7 @@ public:
                 idleTimer->start(displayTimeMs);
             }
             else {
+                qDebug() << "連線錯誤:" << reply->errorString(); 
                 updateState(pixmapIdle, "呼... 呼... (連線中斷喵... 檢查一下設定？)");
                 idleTimer->start(8000);
             }
@@ -402,7 +403,7 @@ int main(int argc, char* argv[]) {
     // 🔥 必須先初始化 app，才能註冊 MessageHandler
     QApplication app(argc, argv);
     qInstallMessageHandler(customMessageHandler);
-
+    qDebug() << "=== 桌面寵物啟動 ===";
     DesktopPet pet;
     pet.show();
     return app.exec();
