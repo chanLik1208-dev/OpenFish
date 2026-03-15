@@ -28,7 +28,7 @@
 #include <QDebug>
 #include <QComboBox>
 #include <QFileInfo>
-
+//
 void customMessageHandler(QtMsgType type, const QMessageLogContext& context, const QString& msg) {
     Q_UNUSED(context);
     QString txt;
