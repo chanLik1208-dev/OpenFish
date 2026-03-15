@@ -1,9 +1,17 @@
 <!DOCTYPE RCC>
 <RCC version="1.0">
-<qresource prefix="/images">
-    <file>Idle.png</file>
-    <file>Idle-Happy.png</file>
-    <file>Happy-Jump.png</file>
-    <file>Happy-Jump-Back.png</file>
-</qresource>
+	<qresource prefix="/images">
+		<file>Angry.png</file>
+		<file>Crying.png</file>
+		<file>Dizziness.png</file>
+		<file>Exciting.png</file>
+		<file>Happy-Jump-Back.png</file>
+		<file>Happy-Jump.png</file>
+		<file>Idle-Happy.png</file>
+		<file>Idle.png</file>
+		<file>Reading.png</file>
+		<file>Relax.png</file>
+		<file>Running.png</file>
+		<file>Shy.png</file>
+	</qresource>
 </RCC>
