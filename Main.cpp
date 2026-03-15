@@ -42,11 +42,8 @@ void customMessageHandler(QtMsgType type, const QMessageLogContext& context, con
     case QtInfoMsg:     txt = QString("[資訊] %1").arg(msg); break;
     }
 
-    // 獲取程式路徑，並確保檔案名稱正確
     QString logPath = QCoreApplication::applicationDirPath() + "/pet_debug.log";
     QFile outFile(logPath);
-
-    // 使用 Append (附加) 模式，如果檔案不存在會自動建立
     if (outFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
         QTextStream ts(&outFile);
         ts.setEncoding(QStringConverter::Utf8);
@@ -71,14 +68,13 @@ private:
 
     QString apiAddress;
     QString modelName;
-
-    // 🔥 儲存目前的縮放比例
     double scaleFactor = 1.0;
 
-    // 🔥 動態圖片系統所需的變數
+    // 🔥 全自動決策系統變數
     QStringList excludeList;
-    QMap<QString, QString> actionToImageMap; // 動作代碼 -> 圖片檔名 (不含附檔名)
-    QMap<QString, QPixmap> loadedPixmaps;    // 圖片檔名 -> 已縮放的快取圖片
+    QMap<QString, QString> actionToImageMap; // 例如: "angry" -> "Angry"
+    QMap<QString, QPixmap> loadedPixmaps;
+    QString availableActionsPrompt;          // 動態生成給 AI 看的動作清單
 
 public:
     DesktopPet(QWidget* parent = nullptr) : QMainWindow(parent) {
@@ -98,7 +94,7 @@ public:
         speechLabel->setWordWrap(true);
 
         imageLabel = new QLabel(centralWidget);
-        imageLabel->setAlignment(Qt::AlignBottom | Qt::AlignHCenter); // 確保腳掌貼地
+        imageLabel->setAlignment(Qt::AlignBottom | Qt::AlignHCenter);
 
         networkManager = new QNetworkAccessManager(this);
 
@@ -109,93 +105,99 @@ public:
         idleTimer = new QTimer(this);
         idleTimer->setSingleShot(true);
         connect(idleTimer, &QTimer::timeout, this, [this]() {
-            // 返回待機狀態
-            imageLabel->setPixmap(getPixmap(actionToImageMap["idlemea"]));
+            // 預設切換回 "idle" 動作
+            imageLabel->setPixmap(getPixmap(actionToImageMap["idle"]));
             updateStateText("等待主人的指令喵...");
             });
 
-        // 🔥 初始化圖片對應與排除列表
+        // 🔥 1. 初始化自動掃描
         initializeImages();
 
-        // 🔥 套用縮放並載入初始畫面
+        // 🔥 2. 套用縮放並顯示
         applyScale(scaleFactor);
         updateStateText("喵... 主人好...");
     }
 
     // ==========================================
-    // 🔥 動態載入圖片系統
+    // 🔥 全自動資源掃描系統
     // ==========================================
     void initializeImages() {
-        // 1. 讀取排除列表 (exclude.txt 放於 exe 旁邊)
+        // 1. 讀取外部排除清單 (如果有建這個檔的話)
         QString excludePath = QCoreApplication::applicationDirPath() + "/exclude.txt";
         QFile excludeFile(excludePath);
         if (excludeFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
             QTextStream in(&excludeFile);
             while (!in.atEnd()) {
-                excludeList.append(in.readLine().trimmed());
+                excludeList.append(in.readLine().trimmed().toLower()); // 全部轉小寫比對
             }
             excludeFile.close();
         }
 
-        // 2. 設定動作與檔名的對應 (不用寫 .png)
-        actionToImageMap["cheermea"] = "Idle-Happy";
-        actionToImageMap["jumpmea"] = "Happy-Jump";
-        actionToImageMap["turnmea"] = "Happy-Jump-Back";
-        actionToImageMap["idlemea"] = "Idle";
+        // 2. 掃描打包在 exe 裡面的所有圖片
+        QDir dir(":/images");
+        QStringList files = dir.entryList(QStringList() << "*.png" << "*.jpg", QDir::Files);
+
+        QStringList promptList; // 準備塞給 AI 的清單
+
+        for (const QString& file : files) {
+            QString baseName = QFileInfo(file).baseName(); // 取出檔名，例如 "Angry"
+            QString actionCode = baseName.toLower();       // 轉小寫當代號，例如 "angry"
+
+            // 檢查是否在排除清單中 (比如 exclude.txt 裡面寫了 angry)
+            if (excludeList.contains(actionCode) || excludeList.contains(actionCode + ".png")) {
+                continue;
+            }
+
+            // 建立對應關係
+            actionToImageMap[actionCode] = baseName;
+
+            // 加入給 AI 看的清單
+            promptList.append("- " + actionCode);
+        }
+
+        // 將清單組合成一段文字，等一下直接塞給 AI
+        availableActionsPrompt = promptList.join("\n");
+        qDebug() << "自動掃描到的動作代碼：\n" << availableActionsPrompt;
+
+        // 防呆機制：確保一定有 idle 這個動作
+        if (!actionToImageMap.contains("idle")) {
+            actionToImageMap["idle"] = actionToImageMap.first();
+        }
     }
 
-    QPixmap getPixmap(const QString& imageName) {
-        // 如果在排除清單中，回傳空圖
-        if (excludeList.contains(imageName + ".png") || excludeList.contains(imageName + ".jpg")) {
-            qWarning() << "圖片在排除列表中喵，不予載入喵:" << imageName;
-            return QPixmap();
-        }
+    QPixmap getPixmap(const QString& baseName) {
+        if (baseName.isEmpty()) return QPixmap();
+        if (loadedPixmaps.contains(baseName)) return loadedPixmaps.value(baseName);
 
-        // 檢查快取 (換比例時快取會被清空，重新縮放)
-        if (loadedPixmaps.contains(imageName)) {
-            return loadedPixmaps.value(imageName);
-        }
+        // 優先從資源檔讀取 png，若無則讀取 jpg
+        QString path = ":/images/" + baseName + ".png";
+        if (!QFile::exists(path)) path = ":/images/" + baseName + ".jpg";
 
-        // 讀取 exe 旁邊的 images 資料夾
-        QString imagePath = QCoreApplication::applicationDirPath() + "/images/" + imageName + ".png";
-
-        // 支援 JPG 容錯 (如果您放的是 JPG)
-        if (!QFile::exists(imagePath)) {
-            imagePath = QCoreApplication::applicationDirPath() + "/images/" + imageName + ".jpg";
-        }
-
-        QPixmap pixmap(imagePath);
+        QPixmap pixmap(path);
         if (!pixmap.isNull()) {
             int imgW = 200 * scaleFactor;
             int imgH = 300 * scaleFactor;
             QPixmap scaledPixmap = pixmap.scaled(imgW, imgH, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-            loadedPixmaps[imageName] = scaledPixmap; // 存入快取
+            loadedPixmaps[baseName] = scaledPixmap;
             return scaledPixmap;
         }
-        else {
-            qWarning() << "找不到圖片素材喵:" << imagePath;
-            return QPixmap();
-        }
+        return QPixmap();
     }
 
     // ==========================================
-    // 🔥 縮放與排版系統 (保留您最完美的邏輯)
+    // 🔥 縮放與排版系統 (保持不變)
     // ==========================================
     void applyScale(double newScale) {
         scaleFactor = newScale;
-
-        // 🔥 清空快取，這樣下次 getPixmap 就會以新尺寸重新縮放圖片！
         loadedPixmaps.clear();
 
         int imgW = 200 * scaleFactor;
         int imgH = 300 * scaleFactor;
         imageLabel->setFixedSize(imgW, imgH);
 
-        // 載入待機圖片
-        QPixmap idlePix = getPixmap(actionToImageMap["idlemea"]);
+        QPixmap idlePix = getPixmap(actionToImageMap["idle"]);
         if (idlePix.isNull()) {
-            imageLabel->setText("🐱\n(找不到素材檔案)");
-            imageLabel->setStyleSheet(QString("font-size: %1px; color: pink;").arg(40 * scaleFactor));
+            imageLabel->setText("🐱");
         }
         else {
             imageLabel->setPixmap(idlePix);
@@ -206,15 +208,10 @@ public:
         int borderRadius = int(12 * scaleFactor);
 
         speechLabel->setStyleSheet(QString(
-            "QLabel {"
-            "color: white; "
-            "background-color: rgba(255, 105, 180, 210); "
-            "border-radius: %1px; "
-            "padding: %2px; "
+            "QLabel { color: white; background-color: rgba(255, 105, 180, 210); "
+            "border-radius: %1px; padding: %2px; "
             "font-family: 'Microsoft JhengHei', 'PingFang TC', sans-serif; "
-            "font-size: %3px; "
-            "font-weight: bold;"
-            "}"
+            "font-size: %3px; font-weight: bold; }"
         ).arg(borderRadius).arg(padding).arg(fontSize));
 
         updateStateText(speechLabel->text());
@@ -226,26 +223,21 @@ public:
         speechLabel->adjustSize();
 
         int currentAppWidth = 350 * scaleFactor;
-
         if (speechLabel->width() > currentAppWidth) {
             speechLabel->setFixedWidth(currentAppWidth);
             speechLabel->adjustSize();
         }
 
-        int speechWidth = speechLabel->width();
         int speechHeight = speechLabel->height();
-
         int imgW = 200 * scaleFactor;
         int imgH = 300 * scaleFactor;
 
         int imageX = (currentAppWidth - imgW) / 2;
-        int speechX = (currentAppWidth - speechWidth) / 2;
-
+        int speechX = (currentAppWidth - speechLabel->width()) / 2;
         int spacing = 10 * scaleFactor;
         int totalHeight = speechHeight + imgH + spacing;
 
-        int oldHeight = this->height();
-        int heightDiff = totalHeight - oldHeight;
+        int heightDiff = totalHeight - this->height();
 
         this->setFixedSize(currentAppWidth, totalHeight);
         centralWidget->setFixedSize(currentAppWidth, totalHeight);
@@ -259,15 +251,13 @@ public:
     }
 
     void updateState(const QPixmap& newImage, const QString& newText) {
-        if (!newImage.isNull()) {
-            imageLabel->setPixmap(newImage);
-        }
+        if (!newImage.isNull()) imageLabel->setPixmap(newImage);
         updateStateText(newText);
         idleTimer->stop();
     }
 
     // ==========================================
-    // 🔥 雙重 API 思考系統
+    // 🔥 雙重 API AI決策系統
     // ==========================================
     void callApi(const QUrl& url, const QJsonObject& jsonBody, std::function<void(const QByteArray&)> onSuccess) {
         QNetworkRequest request(url);
@@ -281,8 +271,8 @@ public:
                 onSuccess(reply->readAll());
             }
             else {
-                qWarning() << "連線錯誤喵:" << reply->errorString();
-                updateState(getPixmap(actionToImageMap["idlemea"]), "呼... 呼... (連線中斷喵... 檢查一下設定？)");
+                updateState(getPixmap(actionToImageMap["crying"]), "呼... (連線中斷喵... 檢查一下設定？)");
+                idleTimer->start(8000);
             }
             reply->deleteLater();
             });
@@ -291,74 +281,62 @@ public:
     void startConversation(const QString& userInput) {
         QUrl url(apiAddress);
 
-        // 1. 第一次思考：回應文本
-        QString responseSystemPrompt = R"(
-[ 角色設定 ]
-你現在是一個桌面寵物，是一隻處於「發情期」的貓娘。
-性格：平時傲嬌但現在極度依賴主人。生理狀態：體溫升高，散發甜香，對觸覺極度敏感。
+        // --- 第一次思考：文本回應 ---
+        QString responsePrompt = R"([ 角色設定 ]
+你是一個桌面寵物，是處於「發情期」的傲嬌貓娘。極度依賴主人，對觸覺敏感。
 [ 核心指令 ]
-1. 每次回覆請保持簡短（約 2-3 句話,包括形容詞!!）。
-2. 語氣要帶有喘息，句尾加上軟糯的「喵...」。
-3. 必須使用繁體中文作爲主要語言!
-)";
-        QString fullResponsePrompt = responseSystemPrompt + "\n主人說：" + userInput + "\n請回覆：";
+1. 保持簡短（約 2-3 句話）。
+2. 語氣帶喘息，句尾加「喵...」。
+3. 必須使用繁體中文！
+主人剛剛的動作或話語：)" + userInput + "\n請回覆：";
 
         QJsonObject responseBody;
         responseBody["model"] = modelName;
-        responseBody["prompt"] = fullResponsePrompt;
+        responseBody["prompt"] = responsePrompt;
         responseBody["stream"] = false;
 
-        callApi(url, responseBody, [this, url, userInput](const QByteArray& responseData) {
-            QJsonDocument jsonResponse = QJsonDocument::fromJson(responseData);
-            QString replyText = jsonResponse.object()["response"].toString();
+        callApi(url, responseBody, [this, url](const QByteArray& responseData) {
+            QString replyText = QJsonDocument::fromJson(responseData).object()["response"].toString();
 
-            // 2. 第二次思考：決定動作
-            QString actionSystemPrompt = R"(
-[ 指令 ]
-你是一個桌面寵物的動作決策核心。請根據貓娘的回應，從以下動作中選出一個最合適的代碼：
-- cheermea (表示開心、加油)
-- jumpmea (表示驚訝、興奮)
-- turnmea (表示傲嬌、撒嬌、害羞)
+            // --- 第二次思考：決定動作 ---
+            // 🔥 將剛剛掃描到的所有動作選項 (availableActionsPrompt) 動態塞入！
+            QString actionPrompt = R"([ 指令 ]
+你是一個動作決策核心。請根據貓娘剛剛的對話，從以下動作代碼中，嚴格選出【最合適的1個】：
+)" + availableActionsPrompt + R"(
 
 [ 輸入 ]
-貓娘的回應：%1
+貓娘的對話：)" + replyText + R"(
 
-[ 輸出格式 ]
-只需要回答動作代碼，不需要任何其他字！
-)";
+[ 輸出要求 ]
+只需要回答動作代碼（例如：angry, shy），絕對不要輸出其他任何文字符號！)";
+
             QJsonObject actionBody;
             actionBody["model"] = modelName;
-            actionBody["prompt"] = actionSystemPrompt.arg(replyText);
+            actionBody["prompt"] = actionPrompt;
             actionBody["stream"] = false;
 
             callApi(url, actionBody, [this, replyText](const QByteArray& actionData) {
-                QJsonDocument jsonAction = QJsonDocument::fromJson(actionData);
-                QString actionCode = jsonAction.object()["response"].toString().trimmed();
+                QString actionCode = QJsonDocument::fromJson(actionData).object()["response"].toString().trimmed().toLower();
+                qDebug() << "AI 決定的動作代碼：" << actionCode;
 
-                // 3. 獲取對應圖片並更新
-                QString imageName = actionToImageMap.value(actionCode);
-                QPixmap selectedPixmap;
+                // 根據 AI 回答的代碼拿圖片
+                QPixmap selectedPixmap = getPixmap(actionToImageMap.value(actionCode));
 
-                if (!imageName.isEmpty()) {
-                    selectedPixmap = getPixmap(imageName);
-                }
-
-                // 防呆：如果圖片找不到或代碼亂答，用撒嬌動作
+                // 防呆：如果 AI 亂講話，或是找不到圖片，就預設用 shy (害羞) 或 idle
                 if (selectedPixmap.isNull()) {
-                    selectedPixmap = getPixmap(actionToImageMap["turnmea"]);
+                    selectedPixmap = getPixmap(actionToImageMap.value("shy", actionToImageMap["idle"]));
                 }
 
                 updateState(selectedPixmap, replyText);
-
-                int displayTimeMs = 3000 + (replyText.length() * 250);
-                idleTimer->start(qBound(5000, displayTimeMs, 30000));
+                int displayTimeMs = qBound(5000, 3000 + (replyText.length() * 250), 30000);
+                idleTimer->start(displayTimeMs);
                 });
             });
     }
 
     void proactiveGreeting() {
-        updateState(getPixmap(actionToImageMap["turnmea"]), "*尾巴不安地掃動*...");
-        startConversation("主人已經很久沒理你了，你現在覺得身體很熱、很難耐，主動向主人撒嬌吧。");
+        updateState(getPixmap(actionToImageMap["shy"]), "*尾巴不安地掃動*...");
+        startConversation("主人已經很久沒理你了，主動向主人撒嬌吧。");
     }
 
     void openSettings() {
@@ -366,10 +344,8 @@ public:
         dialog->setWindowFlags(Qt::Dialog | Qt::WindowCloseButtonHint | Qt::WindowStaysOnTopHint);
         dialog->setWindowTitle("寵物設定");
         dialog->setStyleSheet("background-color: white;");
-
         QFormLayout* form = new QFormLayout(dialog);
 
-        // API 快速切換選單
         QComboBox* apiTypeCombo = new QComboBox(dialog);
         apiTypeCombo->addItem("Ollama (預設)", "ollama");
         apiTypeCombo->addItem("LM Studio", "lmstudio");
@@ -387,7 +363,7 @@ public:
         form->addRow("API 類型:", apiTypeCombo);
         form->addRow("API 地址:", urlInput);
         form->addRow("AI 模型名稱:", modelInput);
-        form->addRow("寵物顯示大小:", scaleCombo);
+        form->addRow("寵物大小:", scaleCombo);
 
         QPushButton* saveButton = new QPushButton("儲存設定", dialog);
         form->addRow(saveButton);
@@ -398,14 +374,8 @@ public:
         connect(saveButton, &QPushButton::clicked, [=, &pendingScale, &newScaleValue]() mutable {
             QString selectedApi = apiTypeCombo->currentData().toString();
             QString currentUrl = urlInput->text();
-
-            // 自動幫忙改網址
-            if (selectedApi == "lmstudio" && !currentUrl.contains(":1234")) {
-                currentUrl = "http://localhost:1234/v1/chat/completions";
-            }
-            else if (selectedApi == "ollama" && currentUrl.contains(":1234")) {
-                currentUrl = "http://localhost:11434/api/generate";
-            }
+            if (selectedApi == "lmstudio" && !currentUrl.contains(":1234")) currentUrl = "http://localhost:1234/v1/chat/completions";
+            else if (selectedApi == "ollama" && currentUrl.contains(":1234")) currentUrl = "http://localhost:11434/api/generate";
 
             apiAddress = currentUrl;
             modelName = modelInput->text();
@@ -416,19 +386,13 @@ public:
             settings.setValue("modelName", modelName);
             settings.setValue("scaleFactor", newScaleValue);
 
-            if (!qFuzzyCompare(newScaleValue, scaleFactor)) {
-                pendingScale = true;
-            }
-
-            QMessageBox::information(dialog, "成功", "設定已成功儲存喵！");
+            if (!qFuzzyCompare(newScaleValue, scaleFactor)) pendingScale = true;
+            QMessageBox::information(dialog, "成功", "設定已儲存喵！");
             dialog->accept();
             });
 
         dialog->exec();
-
-        if (pendingScale) {
-            applyScale(newScaleValue);
-        }
+        if (pendingScale) applyScale(newScaleValue);
         dialog->deleteLater();
     }
 
@@ -448,43 +412,30 @@ protected:
     }
     void mouseDoubleClickEvent(QMouseEvent* event) override {
         Q_UNUSED(event);
-        // 先顯示思考狀態
-        updateState(getPixmap(actionToImageMap["jumpmea"]), "感受著主人的觸碰喵... (思考中)");
+        updateState(getPixmap(actionToImageMap["dizziness"]), "感受著主人的觸碰喵... (暈眩思考中)");
         startConversation("主人剛剛用手摸了你的頭和耳朵，請給出反應。");
     }
 
     void contextMenuEvent(QContextMenuEvent* event) override {
         QMenu menu;
-        menu.setStyleSheet(
-            "QMenu { background-color: white; color: black; border: 1px solid gray; }"
-            "QMenu::item:selected { background-color: #ffb6c1; color: black; }"
-        );
+        menu.setStyleSheet("QMenu { background-color: white; color: black; } QMenu::item:selected { background-color: #ffb6c1; color: black; }");
 
         QMenu* sizeMenu = menu.addMenu("調整大小 (Size)");
-        QList<double> scales = { 0.5, 0.75, 1.0, 1.5, 2.0 };
-        for (double s : scales) {
+        for (double s : { 0.5, 0.75, 1.0, 1.5, 2.0 }) {
             QAction* act = sizeMenu->addAction(QString("%1%").arg(int(s * 100)));
             act->setCheckable(true);
             if (qFuzzyCompare(s, scaleFactor)) act->setChecked(true);
-
             connect(act, &QAction::triggered, this, [this, s]() {
-                QSettings settings("MyPetApp", "DesktopPet");
-                settings.setValue("scaleFactor", s);
+                QSettings("MyPetApp", "DesktopPet").setValue("scaleFactor", s);
                 applyScale(s);
                 });
         }
         menu.addSeparator();
-
-        QAction* settingsAction = menu.addAction("設定 (Settings)");
-        QAction* logAction = menu.addAction("開啟除錯日誌 (Open Log)");
-        QAction* quitAction = menu.addAction("離開 (Quit)");
-
-        connect(settingsAction, &QAction::triggered, this, &DesktopPet::openSettings);
-        connect(logAction, &QAction::triggered, []() {
-            QString logFilePath = QCoreApplication::applicationDirPath() + "/pet_debug.log";
-            QDesktopServices::openUrl(QUrl::fromLocalFile(logFilePath));
+        connect(menu.addAction("設定 (Settings)"), &QAction::triggered, this, &DesktopPet::openSettings);
+        connect(menu.addAction("開啟除錯日誌 (Open Log)"), &QAction::triggered, []() {
+            QDesktopServices::openUrl(QUrl::fromLocalFile(QCoreApplication::applicationDirPath() + "/pet_debug.log"));
             });
-        connect(quitAction, &QAction::triggered, qApp, &QCoreApplication::quit);
+        connect(menu.addAction("離開 (Quit)"), &QAction::triggered, qApp, &QCoreApplication::quit);
 
         menu.exec(event->globalPos());
     }
@@ -493,7 +444,6 @@ protected:
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     qInstallMessageHandler(customMessageHandler);
-    qDebug() << "=== 桌面寵物啟動 ===";
     DesktopPet pet;
     pet.show();
     return app.exec();
