@@ -137,6 +137,12 @@ public:
         QDir dir(":/images");
         QStringList files = dir.entryList(QStringList() << "*.png" << "*.jpg", QDir::Files);
 
+        // 🔥 加入這兩行除錯雷達！
+        qDebug() << "👉 [資源雷達] 在 :/images 中找到了" << files.size() << "張圖片！";
+        if (files.isEmpty()) {
+            qDebug() << "🚨 [致命警告] 找不到任何圖片！代表 resources.qrc 沒有被成功編譯進去！";
+        }
+
         QStringList promptList; // 準備塞給 AI 的清單
 
         for (const QString& file : files) {
@@ -257,27 +263,104 @@ public:
     }
 
     // ==========================================
-    // 🔥 雙重 API AI決策系統
-    // ==========================================
+        // 🔥 雙重 API AI決策系統
+        // ==========================================
     void callApi(const QUrl& url, const QJsonObject& jsonBody, std::function<void(const QByteArray&)> onSuccess) {
         QNetworkRequest request(url);
         request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
 
         QByteArray data = QJsonDocument(jsonBody).toJson();
+
+        // 🐞 [除錯] 記錄發送出去的請求細節
+        qDebug() << "=====================================";
+        qDebug() << "👉 [API 請求發送] 網址：" << url.toString();
+        qDebug() << "👉 [API 請求內容]：" << QString::fromUtf8(data);
+
         QNetworkReply* reply = networkManager->post(request, data);
 
         connect(reply, &QNetworkReply::finished, this, [this, reply, onSuccess]() {
             if (reply->error() == QNetworkReply::NoError) {
-                onSuccess(reply->readAll());
+                QByteArray responseData = reply->readAll();
+                // 🐞 [除錯] 記錄成功的原始回覆
+                qDebug() << "✅ [API 成功回覆] 原始資料：" << QString::fromUtf8(responseData);
+                qDebug() << "=====================================";
+
+                onSuccess(responseData);
             }
             else {
-                updateState(getPixmap(actionToImageMap["crying"]), "呼... (連線中斷喵... 檢查一下設定？)");
+                // 🐞 [除錯] 記錄超詳細的錯誤原因
+                qDebug() << "❌ [API 連線失敗] 錯誤碼：" << reply->error();
+                qDebug() << "❌ [API 連線失敗] 錯誤訊息：" << reply->errorString();
+                // 嘗試讀取伺服器回傳的真實錯誤內容 (例如: "model not found")
+                qDebug() << "❌ [API 伺服器底層訊息]：" << QString::fromUtf8(reply->readAll());
+                qDebug() << "=====================================";
+
+                updateState(getPixmap(actionToImageMap["crying"]), "呼... 呼... (連線中斷喵... 主人快看日誌！)");
                 idleTimer->start(8000);
             }
             reply->deleteLater();
             });
     }
 
+    void startConversation(const QString& userInput) {
+        QUrl url(apiAddress);
+
+        // --- 第一次思考：文本回應 ---
+        QString responsePrompt = R"([ 角色設定 ]
+你是一個桌面寵物，是處於「發情期」的傲嬌貓娘。極度依賴主人，對觸覺敏感。
+[ 核心指令 ]
+1. 保持簡短（約 2-3 句話）。
+2. 語氣帶喘息，句尾加「喵...」。
+3. 必須使用繁體中文！
+主人剛剛的動作或話語：)" + userInput + "\n請回覆：";
+
+        QJsonObject responseBody;
+        responseBody["model"] = modelName;
+        responseBody["prompt"] = responsePrompt;
+        responseBody["stream"] = false;
+
+        qDebug() << "🧠 [系統] 開始第一次思考：準備想台詞...";
+
+        callApi(url, responseBody, [this, url](const QByteArray& responseData) {
+            QString replyText = QJsonDocument::fromJson(responseData).object()["response"].toString();
+            qDebug() << "💬 [系統] 貓娘決定說的話：" << replyText;
+
+            // --- 第二次思考：決定動作 ---
+            QString actionPrompt = R"([ 指令 ]
+你是一個動作決策核心。請根據貓娘剛剛的對話，從以下動作代碼中，嚴格選出【最合適的1個】：
+)" + availableActionsPrompt + R"(
+
+[ 輸入 ]
+貓娘的對話：)" + replyText + R"(
+
+[ 輸出要求 ]
+只需要回答動作代碼（例如：angry, shy），絕對不要輸出其他任何文字符號！)";
+
+            QJsonObject actionBody;
+            actionBody["model"] = modelName;
+            actionBody["prompt"] = actionPrompt;
+            actionBody["stream"] = false;
+
+            qDebug() << "🧠 [系統] 開始第二次思考：準備選動作...";
+
+            callApi(url, actionBody, [this, replyText](const QByteArray& actionData) {
+                QString actionCode = QJsonDocument::fromJson(actionData).object()["response"].toString().trimmed().toLower();
+                qDebug() << "🏃 [系統] AI 最終決定的動作代碼：" << actionCode;
+
+                QPixmap selectedPixmap = getPixmap(actionToImageMap.value(actionCode));
+
+                // 防呆機制
+                if (selectedPixmap.isNull()) {
+                    qWarning() << "⚠️ [警告] 找不到代碼" << actionCode << "的圖片，強制退回害羞或待機狀態！";
+                    selectedPixmap = getPixmap(actionToImageMap.value("shy", actionToImageMap["idle"]));
+                }
+
+                updateState(selectedPixmap, replyText);
+                int displayTimeMs = qBound(5000, 3000 + (replyText.length() * 250), 30000);
+                idleTimer->start(displayTimeMs);
+                });
+            });
+    }
     void startConversation(const QString& userInput) {
         QUrl url(apiAddress);
 
